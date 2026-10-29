@@ -537,6 +537,21 @@ public partial class Item {
 	public IEnumerable<Craft> GetCraftsUsing() =>
 		TarkovDevAPI.GetCrafts().Where(c => c.RequiredItems.Any(r => r.ItemId == Id));
 
+	/// <summary>Barter offers that give this item.</summary>
+	public IEnumerable<Barter> GetBartersFor() =>
+		TarkovDevAPI.GetBarters().Where(b => b.OfferedItem?.ItemId == Id);
+
+	/// <summary>Hideout crafts that produce this item.</summary>
+	public IEnumerable<Craft> GetCraftsFor() =>
+		TarkovDevAPI.GetCrafts().Where(c => c.ProductItem?.ItemId == Id);
+
+	/// <summary>How the player can obtain this item besides looting.</summary>
+	public AcquisitionInfo GetAcquisitionInfo() {
+		var crafts = GetCraftsFor().Count();
+		var barters = GetBartersFor().Count();
+		return new AcquisitionInfo(crafts > 0, crafts, barters > 0, barters);
+	}
+
 	internal static ObjectiveNeedBreakdown GetObjectiveNeedBreakdown(
 	Item item,
 	IReadOnlyList<TaskObjective>? objectives,

@@ -138,10 +138,7 @@
         // Fetch quest and hideout data
         var questReport = Item.GetQuestNeedReport();
         var hideoutBreakdown = Item.GetHideoutRequirementBreakdown();
-        var acquisition = new Item.AcquisitionInfo(true, 4, false, 0
-        @* Item.CraftsFor?.Count > 0, Item.CraftsFor?.Count ?? 0, *@
-        @* Item.BartersFor?.Count > 0, Item.BartersFor?.Count ?? 0 *@
-        );
+        var acquisition = Item.GetAcquisitionInfo();
 
         <MudText Typo="Typo.subtitle1" Class="font-weight-bold px-1 pb-1"
                  Style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
