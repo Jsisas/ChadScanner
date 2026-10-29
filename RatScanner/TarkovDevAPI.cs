@@ -52,6 +52,10 @@ public static class TarkovDevAPI {
 	private const string EndpointTasks = "tasks";
 	private const string EndpointHideout = "hideout";
 	private const string EndpointMaps = "maps";
+	private const string EndpointTraders = "traders";
+	// Barters and crafts are arrays without translation endpoints
+	private const string EndpointBarters = "barters";
+	private const string EndpointCrafts = "crafts";
 
 	private static string LanguageCode => RatConfig.NameScan.Language.ToApiLanguageCode().ToLowerInvariant();
 
@@ -171,10 +175,22 @@ public static class TarkovDevAPI {
 
 	private static Dictionary<string, T> DeserializeKeyedResponse<T>(string endpoint, string rawResponse) where T : class {
 		JObject json = JObject.Parse(rawResponse);
+		JsonSerializer serializer = JsonSerializer.Create(JsonSettings);
+
+		if (endpoint is EndpointBarters or EndpointCrafts) {
+			if (json["data"] is not JArray array) throw new Exception($"Failed to deserialize {endpoint} response");
+			Dictionary<string, T> result = new();
+			for (int i = 0; i < array.Count; i++) {
+				T? entry = array[i].ToObject<T>(serializer);
+				if (entry == null) continue;
+				string key = array[i]["id"]?.ToString() ?? i.ToString();
+				result[key] = entry;
+			}
+			return result;
+		}
+
 		JObject? data = json["data"] as JObject;
 		if (data == null) throw new Exception($"Failed to deserialize {endpoint} response");
-
-		JsonSerializer serializer = JsonSerializer.Create(JsonSettings);
 
 		switch (endpoint) {
 			case EndpointItems: {
@@ -192,7 +208,8 @@ public static class TarkovDevAPI {
 				if (response == null) throw new Exception("Failed to deserialize maps response");
 				return response.Maps.ToDictionary(p => p.Key, p => p.Value as T)!;
 			}
-			case EndpointHideout: {
+			case EndpointHideout:
+			case EndpointTraders: {
 				Dictionary<string, T>? response = data.ToObject<Dictionary<string, T>>(serializer);
 				if (response == null) throw new Exception("Failed to deserialize hideout response");
 				return response;
@@ -205,6 +222,7 @@ public static class TarkovDevAPI {
 	private static bool TryFetchTranslations(string endpoint, out Dictionary<string, string>? translations) {
 		translations = null;
 		string lang = LanguageCode;
+		if (endpoint is EndpointBarters or EndpointCrafts) return false;
 
 		try {
 			string gameMode = RatConfig.GameMode.ToApiString();
@@ -243,6 +261,9 @@ public static class TarkovDevAPI {
 					break;
 				case HideoutStation station:
 					if (translations.TryGetValue(station.Name, out string? stationName)) station.Name = stationName;
+					break;
+				case Trader trader:
+					if (translations.TryGetValue($"{trader.Id} Nickname", out string? traderName)) trader.Name = traderName;
 					break;
 			}
 		}
@@ -298,7 +319,10 @@ public static class TarkovDevAPI {
 			Task.Run(() => QueueEndpointRequest<Item>(ItemsQueryKey(), EndpointItems, d => d.Values.ToArray(), RatConfig.MediumTTL)),
 			Task.Run(() => QueueEndpointRequest<TarkovTask>(TasksQueryKey(), EndpointTasks, d => d.Values.ToArray(), RatConfig.LongTTL)),
 			Task.Run(() => QueueEndpointRequest<HideoutStation>(HideoutStationsQueryKey(), EndpointHideout, d => d.Values.ToArray(), RatConfig.LongTTL)),
-			Task.Run(() => QueueEndpointRequest<Map>(MapsQueryKey(), EndpointMaps, d => d.Values.ToArray(), RatConfig.LongTTL))
+			Task.Run(() => QueueEndpointRequest<Map>(MapsQueryKey(), EndpointMaps, d => d.Values.ToArray(), RatConfig.LongTTL)),
+			Task.Run(() => QueueEndpointRequest<Trader>(TradersQueryKey(), EndpointTraders, d => d.Values.ToArray(), RatConfig.LongTTL)),
+			Task.Run(() => QueueEndpointRequest<Barter>(BartersQueryKey(), EndpointBarters, d => d.Values.ToArray(), RatConfig.LongTTL)),
+			Task.Run(() => QueueEndpointRequest<Craft>(CraftsQueryKey(), EndpointCrafts, d => d.Values.ToArray(), RatConfig.LongTTL))
 		).ConfigureAwait(false);
 	}
 
@@ -314,6 +338,20 @@ public static class TarkovDevAPI {
 	public static Map[] GetMaps(string language, GameMode gameMode) => GetCached<Map>(MapsQueryKey(language, gameMode), EndpointMaps, d => d.Values.ToArray(), RatConfig.LongTTL);
 	public static Map[] GetMaps() => GetCached<Map>(MapsQueryKey(), EndpointMaps, d => d.Values.ToArray(), RatConfig.LongTTL);
 
+	public static Trader[] GetTraders() => GetCached<Trader>(TradersQueryKey(), EndpointTraders, d => d.Values.ToArray(), RatConfig.LongTTL);
+	public static Barter[] GetBarters() => GetCached<Barter>(BartersQueryKey(), EndpointBarters, d => d.Values.ToArray(), RatConfig.LongTTL);
+	public static Craft[] GetCrafts() => GetCached<Craft>(CraftsQueryKey(), EndpointCrafts, d => d.Values.ToArray(), RatConfig.LongTTL);
+
+	public static string GetTraderName(string? traderId) {
+		if (string.IsNullOrEmpty(traderId)) return string.Empty;
+		return GetTraders().FirstOrDefault(t => t.Id == traderId)?.Name ?? string.Empty;
+	}
+
+	public static string GetHideoutStationName(string? stationId) {
+		if (string.IsNullOrEmpty(stationId)) return string.Empty;
+		return GetHideoutStations().FirstOrDefault(s => s.Id == stationId)?.Name ?? string.Empty;
+	}
+
 	#region Query Keys
 
 	private static string ItemsQueryKey() => ItemsQueryKey(LanguageCode, RatConfig.GameMode);
@@ -327,6 +365,10 @@ public static class TarkovDevAPI {
 
 	private static string MapsQueryKey() => MapsQueryKey(LanguageCode, RatConfig.GameMode);
 	private static string MapsQueryKey(string language, GameMode gameMode) => $"maps_{language}_{gameMode}";
+
+	private static string TradersQueryKey() => $"traders_{LanguageCode}_{RatConfig.GameMode}";
+	private static string BartersQueryKey() => $"barters_{RatConfig.GameMode}";
+	private static string CraftsQueryKey() => $"crafts_{RatConfig.GameMode}";
 
 	#endregion
 }

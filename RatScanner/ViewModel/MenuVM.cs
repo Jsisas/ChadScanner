@@ -2,6 +2,7 @@
 using RatScanner.TarkovDev.Json;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
@@ -32,7 +33,7 @@ internal class MenuVM : INotifyPropertyChanged {
 
 	public string PatreonLink => ApiManager.GetResource(ApiManager.ResourceType.PatreonLink);
 
-	public string Updated => DateTime.Parse(LastItem.Updated).ToLocalTime().ToString(CultureInfo.CurrentCulture);
+	public string Updated => LastItem.Updated == null ? "Unknown" : DateTime.Parse(LastItem.Updated).ToLocalTime().ToString(CultureInfo.CurrentCulture);
 
 	public string WikiLink {
 		get {
@@ -46,6 +47,7 @@ internal class MenuVM : INotifyPropertyChanged {
 
 	public TraderPrice? BestTraderOffer => LastItem.GetBestTraderOffer();
 	public TraderPrice? BestTraderOfferVendor => LastItem.GetBestTraderOffer();
+	public string BestTraderName => TarkovDevAPI.GetTraderName(BestTraderOffer?.Trader);
 
     public (int count, int kappaCount) TaskRemainingResult => LastItem.GetTaskRemaining();
 
@@ -56,6 +58,10 @@ internal class MenuVM : INotifyPropertyChanged {
 	public bool KappaNeeded => TaskRemainingKappa > 0;
 	
 	public int HideoutRemaining => LastItem.GetHideoutRemaining();
+
+	public ObservableCollection<TaskItemRemaining> TaskItemRemaining => LastItem.GetTaskItemRemaining();
+
+	public ObservableCollection<HideoutItemRemaining> HideoutItemRemaining => LastItem.GetHideoutRemainingItem();
 
 	public bool ItemNeeded => TaskRemaining + HideoutRemaining > 0;
 

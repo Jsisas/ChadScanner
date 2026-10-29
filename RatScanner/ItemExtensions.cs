@@ -1,6 +1,7 @@
 using RatScanner.FetchModels.TarkovTracker;
 using RatScanner.TarkovDev.Json;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 
 namespace RatScanner.TarkovDev.Json;
@@ -16,6 +17,27 @@ public partial class Item {
 	}
 
 	public (int count, int kappaCount) GetTaskRemaining(UserProgress? progress = null) {
+		int count = 0;
+		int kappaCount = 0;
+		foreach ((TarkovTask _, int taskCount, int taskKappaCount) in GetTaskNeeds(progress)) {
+			count += taskCount;
+			kappaCount += taskKappaCount;
+		}
+		return (count, kappaCount);
+	}
+
+	public ObservableCollection<TaskItemRemaining> GetTaskItemRemaining(UserProgress? progress = null) {
+		ObservableCollection<TaskItemRemaining> result = new();
+		foreach ((TarkovTask task, int count, int _) in GetTaskNeeds(progress)) {
+			if (count > 0) result.Add(new TaskItemRemaining(count, task));
+		}
+		return result;
+	}
+
+	/// <summary>
+	/// Remaining amount of this item per open task.
+	/// </summary>
+	private IEnumerable<(TarkovTask task, int count, int kappaCount)> GetTaskNeeds(UserProgress? progress) {
 		// Compensation for Damage Tasks
 		// These tasks are not tracked by TarkovTracker
 		string[] excludedTasks = new string[] {
@@ -29,8 +51,6 @@ public partial class Item {
 		progress ??= GetUserProgress();
 
 		int needed = 0;
-		int count = 0;
-		int kappaCount = 0;
 
 		bool showNonFir = RatConfig.Tracking.ShowNonFIRNeeds;
 
@@ -45,6 +65,8 @@ public partial class Item {
 			if (excludedTasks.Contains(task.Id)) continue;
 
 			if (task.Objectives == null) continue;
+			int count = 0;
+			int kappaCount = 0;
 			foreach (TaskObjective? objective in task.Objectives) {
 				if (objective == null) continue;
 				if (objective.Type == "giveItem") {
@@ -83,16 +105,20 @@ public partial class Item {
 					if (task.KappaRequired == true) kappaCount += needed;
 				}
 			}
+			yield return (task, count, kappaCount);
 		}
-		return (count, kappaCount);
 	}
 
 	public int GetHideoutRemaining(UserProgress? progress = null) {
+		return GetHideoutRemainingItem(progress).Sum(x => x.ItemCount);
+	}
+
+	public ObservableCollection<HideoutItemRemaining> GetHideoutRemainingItem(UserProgress? progress = null) {
 		progress ??= GetUserProgress();
 		progress.Tasks ??= new List<Progress>();
 		progress.TaskObjectives ??= new List<Progress>();
 
-		int count = 0;
+		ObservableCollection<HideoutItemRemaining> result = new();
 		HideoutStation[] stations = TarkovDevAPI.GetHideoutStations();
 
 		foreach (HideoutStation station in stations) {
@@ -104,6 +130,7 @@ public partial class Item {
 				if (progress.HideoutModules.Any(p => p.Id == level.Id && p.Complete)) continue;
 
 				if (level?.ItemRequirements == null) continue;
+				int count = 0;
 				foreach (RequirementItem? requiredItem in level.ItemRequirements) {
 					if (requiredItem?.Item != Id) continue;
 
@@ -111,9 +138,19 @@ public partial class Item {
 					List<Progress> objectiveProgress = progress.HideoutParts.Where(p => p.Id == requiredItem.Id).ToList();
 					foreach (Progress p in objectiveProgress) count -= p.Complete ? requiredItem.Count : p.Count;
 				}
+
+				if (count > 0) result.Add(new HideoutItemRemaining(count, station.Name, level.Level));
 			}
 		}
-		return count;
+		return result;
+	}
+
+	public IEnumerable<Barter> GetBartersUsing() {
+		return TarkovDevAPI.GetBarters().Where(b => b.RequiredItems.Any(r => r.Item == Id));
+	}
+
+	public IEnumerable<Craft> GetCraftsUsing() {
+		return TarkovDevAPI.GetCrafts().Where(c => c.RequiredItems.Any(r => r.Item == Id));
 	}
 
 	public IEnumerable<Item> GetAmmoOfSameCaliber() {
