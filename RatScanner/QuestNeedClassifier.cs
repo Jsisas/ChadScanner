@@ -105,12 +105,6 @@ internal static class QuestNeedClassifier {
 	};
 
 	public static QuestNeedReport Classify(Item item, IReadOnlyList<TarkovTask> tasks, UserProgress progress, bool showNonFir) {
-		ArgumentNullException.ThrowIfNull(item);
-		ArgumentNullException.ThrowIfNull(progress);
-
-		var tasksById = TaskExtensions.GetTaskLookup();
-		var chains = QuestChainIndex.Build(tasksById.Values);
-
 		int active = 0,
 			available = 0,
 			future = 0,
@@ -126,35 +120,9 @@ internal static class QuestNeedClassifier {
 		int? unlockLevel = null;
 		var kappa = 0;
 
-		foreach (var task in tasks) {
-			if (ExcludedTaskIds.Contains(task.Id))
-				continue;
-
-			// Recorded, non-invalid objective progress proves the player already
-			// started this task. Unlock gates (trader standing, Lightkeeper
-			// dialogue, active-only prerequisites) have therefore already been
-			// crossed and must not demote a live need to uncertain.
-			var taskShowsProgress = TaskShowsProgress(task, progress);
-			var gate = ClassifyGate(task, tasksById, chains, progress, out var taskUnlockLevel);
-			if (gate != QuestGate.NotApplicable && taskShowsProgress)
-				gate = QuestGate.ActiveNow;
-			if (gate == QuestGate.NotApplicable)
-				continue;
-
-			var need = GetObjectiveNeedBreakdown(
-				item,
-				task.Objectives,
-				progress,
-				showNonFir
-			);
-			if (need.Total <= 0)
-				continue;
-
+		foreach (var (task, gate, need, taskUnlockLevel) in EnumerateNeeds(item, tasks, progress, showNonFir)) {
 			if (task.KappaRequired == true)
 				kappa += need.Total;
-
-			if (gate == QuestGate.ApplicableNow)
-				gate = QuestGate.AvailableNow;
 
 			switch (gate) {
 				case QuestGate.ActiveNow:
@@ -204,6 +172,65 @@ internal static class QuestNeedClassifier {
 			UnlockLevel = unlockLevel,
 			KappaTotal = kappa,
 		};
+	}
+
+	/// <summary>
+	/// Tasks that currently need the item (active or available now) with the remaining amount per task,
+	/// i.e. the tasks summed up by <see cref="QuestNeedReport.CurrentTotal"/>.
+	/// </summary>
+	public static List<(TarkovTask Task, int Count)> CurrentNeedsPerTask(Item item, IReadOnlyList<TarkovTask> tasks, UserProgress progress, bool showNonFir) {
+		List<(TarkovTask Task, int Count)> result = [];
+		foreach (var (task, gate, need, _) in EnumerateNeeds(item, tasks, progress, showNonFir)) {
+			if (gate is QuestGate.ActiveNow or QuestGate.AvailableNow)
+				result.Add((task, need.Total));
+		}
+		return result;
+	}
+
+	/// <summary>
+	/// Every applicable task that still needs the item, with its gate and remaining need.
+	/// </summary>
+	private static IEnumerable<(TarkovTask Task, QuestGate Gate, ObjectiveNeedBreakdown Need, int? UnlockLevel)> EnumerateNeeds(
+		Item item,
+		IReadOnlyList<TarkovTask> tasks,
+		UserProgress progress,
+		bool showNonFir
+	) {
+		ArgumentNullException.ThrowIfNull(item);
+		ArgumentNullException.ThrowIfNull(progress);
+
+		var tasksById = TaskExtensions.GetTaskLookup();
+		var chains = QuestChainIndex.Build(tasksById.Values);
+
+		foreach (var task in tasks) {
+			if (ExcludedTaskIds.Contains(task.Id))
+				continue;
+
+			// Recorded, non-invalid objective progress proves the player already
+			// started this task. Unlock gates (trader standing, Lightkeeper
+			// dialogue, active-only prerequisites) have therefore already been
+			// crossed and must not demote a live need to uncertain.
+			var taskShowsProgress = TaskShowsProgress(task, progress);
+			var gate = ClassifyGate(task, tasksById, chains, progress, out var taskUnlockLevel);
+			if (gate != QuestGate.NotApplicable && taskShowsProgress)
+				gate = QuestGate.ActiveNow;
+			if (gate == QuestGate.NotApplicable)
+				continue;
+
+			var need = GetObjectiveNeedBreakdown(
+				item,
+				task.Objectives,
+				progress,
+				showNonFir
+			);
+			if (need.Total <= 0)
+				continue;
+
+			if (gate == QuestGate.ApplicableNow)
+				gate = QuestGate.AvailableNow;
+
+			yield return (task, gate, need, taskUnlockLevel);
+		}
 	}
 
 	/// <summary>Gate evaluation without item context.</summary>

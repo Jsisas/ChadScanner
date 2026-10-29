@@ -292,6 +292,15 @@ public partial class Item {
 		return (report.CurrentTotal, report.KappaTotal);
 	}
 
+	/// <summary>
+	/// Tasks that currently need this item, with the remaining amount per task.
+	/// Sums up to <see cref="GetTaskRemaining()"/>'s count.
+	/// </summary>
+	public List<TaskItemRemaining> GetTaskItemRemaining() {
+		var needs = QuestNeedClassifier.CurrentNeedsPerTask(this, TarkovDevAPI.GetTasks(), GetUserProgress(), RatConfig.Tracking.ShowNonFIRNeeds);
+		return [.. needs.Select(n => new TaskItemRemaining(n.Count, n.Task))];
+	}
+
 	internal QuestNeedReport GetQuestNeedReport() => GetQuestNeedReport(GetUserProgress());
 
 	/// <summary>
@@ -472,9 +481,27 @@ public partial class Item {
 	public RequirementBreakdown GetHideoutRequirementBreakdown(UserProgress progress) {
 		var fir = 0;
 		var nonFir = 0;
-		var stations = TarkovDevAPI.GetHideoutStations();
+		foreach (var (_, _, requiredItem, remaining) in EnumerateHideoutNeeds(progress)) {
+			if (requiredItem.FoundInRaid)
+				fir += remaining;
+			else
+				nonFir += remaining;
+		}
 
-		foreach (var station in stations) {
+		return new RequirementBreakdown(fir + nonFir, fir, nonFir);
+	}
+
+	/// <summary>
+	/// Unbuilt hideout station levels that need this item, with the remaining amount per level.
+	/// </summary>
+	public List<HideoutItemRemaining> GetHideoutItemRemaining() {
+		return [.. EnumerateHideoutNeeds(GetUserProgress())
+			.GroupBy(n => n.Level)
+			.Select(g => new HideoutItemRemaining(g.Sum(n => n.Remaining), g.First().Station.Name, g.Key.Level))];
+	}
+
+	private IEnumerable<(HideoutStation Station, HideoutStationLevel Level, RequirementItem RequiredItem, int Remaining)> EnumerateHideoutNeeds(UserProgress progress) {
+		foreach (var station in TarkovDevAPI.GetHideoutStations()) {
 			if (station.Levels == null)
 				continue;
 			foreach (var level in station.Levels) {
@@ -493,20 +520,22 @@ public partial class Item {
 					var remaining = requiredItem.Count;
 					foreach (var p in progress.HideoutParts.Where(p => p.Id == requiredItem.Id))
 						remaining -= p.Complete ? requiredItem.Count : p.Count;
-					remaining = Math.Max(0, remaining);
 					if (remaining <= 0)
 						continue;
 
-					if (requiredItem.FoundInRaid)
-						fir += remaining;
-					else
-						nonFir += remaining;
+					yield return (station, level, requiredItem, remaining);
 				}
 			}
 		}
-
-		return new RequirementBreakdown(fir + nonFir, fir, nonFir);
 	}
+
+	/// <summary>Barter offers that take this item as payment.</summary>
+	public IEnumerable<Barter> GetBartersUsing() =>
+		TarkovDevAPI.GetBarters().Where(b => b.RequiredItems.Any(r => r.ItemId == Id));
+
+	/// <summary>Hideout crafts that consume this item.</summary>
+	public IEnumerable<Craft> GetCraftsUsing() =>
+		TarkovDevAPI.GetCrafts().Where(c => c.RequiredItems.Any(r => r.ItemId == Id));
 
 	internal static ObjectiveNeedBreakdown GetObjectiveNeedBreakdown(
 	Item item,

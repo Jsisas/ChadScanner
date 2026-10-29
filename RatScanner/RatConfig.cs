@@ -179,6 +179,20 @@ internal static partial class RatConfig {
 		}
 	}
 
+	// Floating tooltip shown at the cursor after a scan
+	internal static class FloatingTooltip {
+		internal static bool Enable = true;
+		internal static bool ShowName = true;
+		internal static bool ShowAvgDayPrice = true;
+		internal static bool ShowPricePerSlot = true;
+		internal static bool ShowTraderPrice = true;
+		internal static bool ShowUpdated = true;
+		internal static bool ShowTasksInfo = true;
+		internal static bool ShowHideoutInfo = true;
+		internal static bool ShowBarterInfo = true;
+		internal static bool ShowCraftsInfo = true;
+	}
+
 	// Application hotkeys
 	internal static class Hotkeys {
 		internal static Hotkey OpenWiki = new();
@@ -315,6 +329,18 @@ internal static partial class RatConfig {
 		config.Section = nameof(Overlay.Scanning);
 		Overlay.Scanning.Enable = config.ReadBool(nameof(Overlay.Scanning.Enable), Overlay.Scanning.Enable);
 
+		config.Section = nameof(FloatingTooltip);
+		FloatingTooltip.Enable = config.ReadBool(nameof(FloatingTooltip.Enable), FloatingTooltip.Enable);
+		FloatingTooltip.ShowName = config.ReadBool(nameof(FloatingTooltip.ShowName), FloatingTooltip.ShowName);
+		FloatingTooltip.ShowAvgDayPrice = config.ReadBool(nameof(FloatingTooltip.ShowAvgDayPrice), FloatingTooltip.ShowAvgDayPrice);
+		FloatingTooltip.ShowPricePerSlot = config.ReadBool(nameof(FloatingTooltip.ShowPricePerSlot), FloatingTooltip.ShowPricePerSlot);
+		FloatingTooltip.ShowTraderPrice = config.ReadBool(nameof(FloatingTooltip.ShowTraderPrice), FloatingTooltip.ShowTraderPrice);
+		FloatingTooltip.ShowUpdated = config.ReadBool(nameof(FloatingTooltip.ShowUpdated), FloatingTooltip.ShowUpdated);
+		FloatingTooltip.ShowTasksInfo = config.ReadBool(nameof(FloatingTooltip.ShowTasksInfo), FloatingTooltip.ShowTasksInfo);
+		FloatingTooltip.ShowHideoutInfo = config.ReadBool(nameof(FloatingTooltip.ShowHideoutInfo), FloatingTooltip.ShowHideoutInfo);
+		FloatingTooltip.ShowBarterInfo = config.ReadBool(nameof(FloatingTooltip.ShowBarterInfo), FloatingTooltip.ShowBarterInfo);
+		FloatingTooltip.ShowCraftsInfo = config.ReadBool(nameof(FloatingTooltip.ShowCraftsInfo), FloatingTooltip.ShowCraftsInfo);
+
 		config.Section = nameof(Hotkeys);
 		Hotkeys.OpenWiki = config.ReadHotkey(nameof(Hotkeys.OpenWiki), Hotkeys.OpenWiki);
 		Hotkeys.OpenTarkovDev = config.ReadHotkey(nameof(Hotkeys.OpenTarkovDev), Hotkeys.OpenTarkovDev);
@@ -407,6 +433,18 @@ internal static partial class RatConfig {
 
 		config.Section = nameof(Overlay.Scanning);
 		config.WriteBool(nameof(Overlay.Scanning.Enable), Overlay.Scanning.Enable);
+
+		config.Section = nameof(FloatingTooltip);
+		config.WriteBool(nameof(FloatingTooltip.Enable), FloatingTooltip.Enable);
+		config.WriteBool(nameof(FloatingTooltip.ShowName), FloatingTooltip.ShowName);
+		config.WriteBool(nameof(FloatingTooltip.ShowAvgDayPrice), FloatingTooltip.ShowAvgDayPrice);
+		config.WriteBool(nameof(FloatingTooltip.ShowPricePerSlot), FloatingTooltip.ShowPricePerSlot);
+		config.WriteBool(nameof(FloatingTooltip.ShowTraderPrice), FloatingTooltip.ShowTraderPrice);
+		config.WriteBool(nameof(FloatingTooltip.ShowUpdated), FloatingTooltip.ShowUpdated);
+		config.WriteBool(nameof(FloatingTooltip.ShowTasksInfo), FloatingTooltip.ShowTasksInfo);
+		config.WriteBool(nameof(FloatingTooltip.ShowHideoutInfo), FloatingTooltip.ShowHideoutInfo);
+		config.WriteBool(nameof(FloatingTooltip.ShowBarterInfo), FloatingTooltip.ShowBarterInfo);
+		config.WriteBool(nameof(FloatingTooltip.ShowCraftsInfo), FloatingTooltip.ShowCraftsInfo);
 
 		config.Section = nameof(Hotkeys);
 		config.WriteHotkey(nameof(Hotkeys.OpenWiki), Hotkeys.OpenWiki);

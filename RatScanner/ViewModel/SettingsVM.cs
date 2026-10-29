@@ -110,6 +110,18 @@ internal class SettingsVM : INotifyPropertyChanged {
 
 	public bool EnableScanningOverlay { get; set; }
 
+	// Floating tooltip
+	public bool IsFloatingTooltipEnabled { get; set; }
+	public bool IsFloatingTooltipShowName { get; set; }
+	public bool IsFloatingTooltipShowAvgDayPrice { get; set; }
+	public bool IsFloatingTooltipShowPricePerSlot { get; set; }
+	public bool IsFloatingTooltipShowTraderPrice { get; set; }
+	public bool IsFloatingTooltipShowUpdated { get; set; }
+	public bool IsFloatingTooltipShowTasksInfo { get; set; }
+	public bool IsFloatingTooltipShowHideoutInfo { get; set; }
+	public bool IsFloatingTooltipShowBarterInfo { get; set; }
+	public bool IsFloatingTooltipShowCraftsInfo { get; set; }
+
 	// EFT log tracking
 	public bool EnableLogTracking { get; set; }
 	public bool LogTrackQuests { get; set; }
@@ -202,6 +214,17 @@ internal class SettingsVM : INotifyPropertyChanged {
 		CloseOverlayHotkey = new Hotkey(RatConfig.Overlay.Search.CloseHotkey);
 
 		EnableScanningOverlay = RatConfig.Overlay.Scanning.Enable;
+
+		IsFloatingTooltipEnabled = RatConfig.FloatingTooltip.Enable;
+		IsFloatingTooltipShowName = RatConfig.FloatingTooltip.ShowName;
+		IsFloatingTooltipShowAvgDayPrice = RatConfig.FloatingTooltip.ShowAvgDayPrice;
+		IsFloatingTooltipShowPricePerSlot = RatConfig.FloatingTooltip.ShowPricePerSlot;
+		IsFloatingTooltipShowTraderPrice = RatConfig.FloatingTooltip.ShowTraderPrice;
+		IsFloatingTooltipShowUpdated = RatConfig.FloatingTooltip.ShowUpdated;
+		IsFloatingTooltipShowTasksInfo = RatConfig.FloatingTooltip.ShowTasksInfo;
+		IsFloatingTooltipShowHideoutInfo = RatConfig.FloatingTooltip.ShowHideoutInfo;
+		IsFloatingTooltipShowBarterInfo = RatConfig.FloatingTooltip.ShowBarterInfo;
+		IsFloatingTooltipShowCraftsInfo = RatConfig.FloatingTooltip.ShowCraftsInfo;
 
 		EnableLogTracking = RatConfig.LogTracking.Enable;
 		LogTrackQuests = RatConfig.LogTracking.TrackQuests;
@@ -375,6 +398,17 @@ internal class SettingsVM : INotifyPropertyChanged {
 
 		RatConfig.Overlay.Scanning.Enable = EnableScanningOverlay;
 
+		RatConfig.FloatingTooltip.Enable = IsFloatingTooltipEnabled;
+		RatConfig.FloatingTooltip.ShowName = IsFloatingTooltipShowName;
+		RatConfig.FloatingTooltip.ShowAvgDayPrice = IsFloatingTooltipShowAvgDayPrice;
+		RatConfig.FloatingTooltip.ShowPricePerSlot = IsFloatingTooltipShowPricePerSlot;
+		RatConfig.FloatingTooltip.ShowTraderPrice = IsFloatingTooltipShowTraderPrice;
+		RatConfig.FloatingTooltip.ShowUpdated = IsFloatingTooltipShowUpdated;
+		RatConfig.FloatingTooltip.ShowTasksInfo = IsFloatingTooltipShowTasksInfo;
+		RatConfig.FloatingTooltip.ShowHideoutInfo = IsFloatingTooltipShowHideoutInfo;
+		RatConfig.FloatingTooltip.ShowBarterInfo = IsFloatingTooltipShowBarterInfo;
+		RatConfig.FloatingTooltip.ShowCraftsInfo = IsFloatingTooltipShowCraftsInfo;
+
 		RatConfig.LogTracking.Enable = EnableLogTracking;
 		RatConfig.LogTracking.TrackQuests = LogTrackQuests;
 		RatConfig.LogTracking.TrackRaidLifecycle = LogTrackRaidLifecycle;
@@ -408,6 +442,7 @@ internal class SettingsVM : INotifyPropertyChanged {
 		// The scanning overlay may have just been switched off while it was on
 		// screen, so the new setting is applied rather than waiting for the next scan.
 		RatScannerMain.Instance.ApplyScanningOverlaySetting();
+		View.FloatingTooltip.Instance.UpdateElements();
 
 		RatEye.Config.LogDebug = RatConfig.LogDebug;
 		RatScannerMain.Instance.HotkeyManager.RegisterHotkeys();

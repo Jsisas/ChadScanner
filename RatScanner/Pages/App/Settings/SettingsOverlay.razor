@@ -14,6 +14,23 @@
                        Color="Color.Primary" Dense="true" />
         </SettingsRow>
     </SettingsCard>
+
+    <SettingsCard Title="@Localizer["FloatingTooltipGroup"]" Subtitle="@Localizer["FloatingTooltipGroupDesc"]">
+        <SettingsRow Label="@Localizer["EnableFloatingTooltip"]" SubLabel="@Localizer["EnableFloatingTooltipHint"]">
+            <MudSwitch T="bool" Checked="@SettingsVM.IsFloatingTooltipEnabled"
+                       CheckedChanged="@((bool v) => { SettingsVM.IsFloatingTooltipEnabled = v; SettingsVM.MarkDirty(); })"
+                       Color="Color.Primary" Dense="true" />
+        </SettingsRow>
+        @TooltipRow("NameLabel", SettingsVM.IsFloatingTooltipShowName, v => SettingsVM.IsFloatingTooltipShowName = v)
+        @TooltipRow("AvgDailyPrice", SettingsVM.IsFloatingTooltipShowAvgDayPrice, v => SettingsVM.IsFloatingTooltipShowAvgDayPrice = v)
+        @TooltipRow("PricePerSlot", SettingsVM.IsFloatingTooltipShowPricePerSlot, v => SettingsVM.IsFloatingTooltipShowPricePerSlot = v)
+        @TooltipRow("TraderPrice", SettingsVM.IsFloatingTooltipShowTraderPrice, v => SettingsVM.IsFloatingTooltipShowTraderPrice = v)
+        @TooltipRow("ShowTasks", SettingsVM.IsFloatingTooltipShowTasksInfo, v => SettingsVM.IsFloatingTooltipShowTasksInfo = v)
+        @TooltipRow("ShowHideoutUpgrades", SettingsVM.IsFloatingTooltipShowHideoutInfo, v => SettingsVM.IsFloatingTooltipShowHideoutInfo = v)
+        @TooltipRow("ShowBarters", SettingsVM.IsFloatingTooltipShowBarterInfo, v => SettingsVM.IsFloatingTooltipShowBarterInfo = v)
+        @TooltipRow("ShowCrafts", SettingsVM.IsFloatingTooltipShowCraftsInfo, v => SettingsVM.IsFloatingTooltipShowCraftsInfo = v)
+        @TooltipRow("UpdatedTimestamp", SettingsVM.IsFloatingTooltipShowUpdated, v => SettingsVM.IsFloatingTooltipShowUpdated = v)
+    </SettingsCard>
     
     <SettingsCard Title="@Localizer["OverlayGroup"]" Subtitle="@Localizer["OverlayGroupDesc"]">
         <SettingsRow Label="@Localizer["EnableSearchOverlay"]" SubLabel="@Localizer["EnableSearchOverlayHint"]">
@@ -57,4 +74,11 @@
     public void Dispose() {
         SettingsVM.PropertyChanged -= PropertyChangeHandler;
     }
+
+    private RenderFragment TooltipRow(string labelKey, bool value, Action<bool> set) =>
+        @<SettingsRow Label="@Localizer[labelKey]" Disabled="@(!SettingsVM.IsFloatingTooltipEnabled)">
+            <MudSwitch T="bool" Checked="@value"
+                       CheckedChanged="@((bool v) => { set(v); SettingsVM.MarkDirty(); })"
+                       Color="Color.Primary" Dense="true" />
+        </SettingsRow>;
 }

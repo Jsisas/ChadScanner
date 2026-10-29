@@ -54,6 +54,9 @@ public partial class BlazorUI : UserControl, ISwitchable {
 
 		BlazorInteractableOverlay ??= new BlazorInteractableOverlay(serviceProvider);
 
+		// Created up front so it is subscribed to scans before the first one arrives
+		_ = FloatingTooltip.Instance;
+
 		InitializeComponent();
 	}
 
