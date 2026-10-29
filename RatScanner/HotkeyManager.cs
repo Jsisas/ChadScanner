@@ -100,6 +100,7 @@ internal partial class HotkeyManager {
 	}
 
 	private void OnNameScanHotkey(object? sender, KeyUpEventArgs e) {
+		if (!IsForegroundAllowed(false)) return;
 		Wrap(() => {
 			RatScannerMain.Instance.NameScan(UserActivityHelper.GetMousePosition());
 			if (_last_mouse_click + 500 < DateTimeOffset.Now.ToUnixTimeMilliseconds() && NameScan.EnableAuto) {
@@ -111,11 +112,12 @@ internal partial class HotkeyManager {
 	}
 
 	private void OnIconScanHotkey(object? sender, KeyUpEventArgs e) {
+		if (!IsForegroundAllowed(false)) return;
 		Wrap(() => RatScannerMain.Instance.IconScan(UserActivityHelper.GetMousePosition()));
 	}
 
 	private void OnOpenInteractableOverlayHotkey(object? sender, KeyUpEventArgs e) {
-		if (!CanOpenInteractableOverlay()) return;
+		if (!IsForegroundAllowed(true)) return;
 
 		Wrap(() => Application.Current.Dispatcher.Invoke(() => Wrap(() => BlazorUI.BlazorInteractableOverlay.ShowOverlay())));
 	}
@@ -126,6 +128,7 @@ internal partial class HotkeyManager {
 	/// close itself instead of the whole overlay vanishing underneath it.
 	/// </summary>
 	private void OnEscapeKey(object? sender, KeyUpEventArgs e) {
+		if (!IsForegroundAllowed(true)) return;
 		Wrap(() => Application.Current.Dispatcher.Invoke(() => Wrap(() => {
 			// Snapshot before invoking: a handler may unsubscribe, and this must
 			// not then re-enter a handler that has already gone away.
@@ -145,6 +148,7 @@ internal partial class HotkeyManager {
 	/// when nothing has been picked yet.
 	/// </summary>
 	private void OnOpenWikiHotkey(object? sender, KeyUpEventArgs e) {
+		if (!IsForegroundAllowed(true)) return;
 		Wrap(() => {
 			var link = WikiLinkFor(SelectedItem() ?? LastScannedItem());
 			if (link is not null) OpenURL(link);
@@ -156,6 +160,7 @@ internal partial class HotkeyManager {
 	/// page, so a selected quest opens that rather than an item page.
 	/// </summary>
 	private void OnOpenTarkovDevHotkey(object? sender, KeyUpEventArgs e) {
+		if (!IsForegroundAllowed(true)) return;
 		Wrap(() => {
 			var task = SelectedTask();
 			if (task is not null) {
@@ -173,7 +178,7 @@ internal partial class HotkeyManager {
 	/// so the overlay page can show the map viewer.
 	/// </summary>
 	private void OnOpenMapHotkey(object? sender, KeyUpEventArgs e) {
-		if (!CanOpenInteractableOverlay()) return;
+		if (!IsForegroundAllowed(true)) return;
 
 		Wrap(() => Application.Current.Dispatcher.Invoke(() => Wrap(() => {
 			BlazorUI.BlazorInteractableOverlay.ShowOverlay();
@@ -181,19 +186,19 @@ internal partial class HotkeyManager {
 		})));
 	}
 
-	private static bool CanOpenInteractableOverlay() {
-		var gameProcesses = Process.GetProcessesByName("EscapeFromTarkov");
+	/// True when the foreground window belongs to Tarkov, or to RatScanner itself when allowSelf is set
+	private static bool IsForegroundAllowed(bool allowSelf) {
+		var foregroundWindow = NativeMethods.GetForegroundWindow();
+		if (foregroundWindow == IntPtr.Zero) return false;
+		_ = NativeMethods.GetWindowThreadProcessId(foregroundWindow, out var foregroundProcessId);
+		if (allowSelf && foregroundProcessId == Environment.ProcessId) return true;
 		try {
-			if (gameProcesses.Length == 0) return true;
-			if (BlazorUI.BlazorInteractableOverlay.IsVisible) return true;
-
-			var foregroundWindow = NativeMethods.GetForegroundWindow();
-			if (foregroundWindow == IntPtr.Zero) return false;
-
-			_ = NativeMethods.GetWindowThreadProcessId(foregroundWindow, out var foregroundProcessId);
-			return gameProcesses.Any(process => process.Id == foregroundProcessId);
-		} finally {
-			foreach (var process in gameProcesses) process.Dispose();
+			using var process = Process.GetProcessById((int)foregroundProcessId);
+			return process.ProcessName.Equals("EscapeFromTarkov", StringComparison.OrdinalIgnoreCase);
+		} catch (ArgumentException) {
+			return false; // process exited between the two calls
+		} catch (InvalidOperationException) {
+			return false;
 		}
 	}
 
