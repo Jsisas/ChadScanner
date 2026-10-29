@@ -387,9 +387,11 @@ public class RatScannerMain : INotifyPropertyChanged {
 			ProcessingConfig = new Config.Processing() {
 				Scale = Config.Processing.Resolution2Scale(RatConfig.ScreenWidth, RatConfig.ScreenHeight),
 				Language = RatConfig.NameScan.Language,
+				UseCache = RatConfig.IconScan.UseCachedIcons,
 				IconConfig = new Config.Processing.Icon() {
 					UseStaticIcons = true,
 					ScanMode = Config.Processing.Icon.ScanModes.TemplateMatching,
+					ScanRotatedIcons = RatConfig.IconScan.ScanRotatedIcons,
 				},
 				InventoryConfig = new Config.Processing.Inventory() {
 					OptimizeHighlighted = highlighted,
