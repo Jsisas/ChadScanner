@@ -1,0 +1,3 @@
+[submodule "RatEye"]
+	path = RatEye
+	url = https://github.com/RatScanner/RatEye.git
