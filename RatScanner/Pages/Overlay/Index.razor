@@ -11,11 +11,13 @@
     style="transform-origin: top left; transform: scale(@((1f / SettingsVM.ScreenScale).ToString(CultureInfo.InvariantCulture)));">
     @* Only the newest scan: older ones still inside their display time would otherwise
        flash at their old position and size next to the new box. *@
+    @{ _drewScan = false; }
     @foreach (var itemScan in MenuVM.ItemScans.TakeLast(1)) {
         var item = itemScan.Item;
         @if (itemScan != null
        && itemScan.GetToolTipPosition() != null
        && itemScan.DissapearAt > DateTimeOffset.Now.ToUnixTimeMilliseconds()) {
+            _drewScan = true;
             @if (itemScan is ItemIconScan iconScan) {
                 var leftPos = iconScan.GetToolTipPosition().X - VirtualScreenOffset.XOffset;
                 var topPos = iconScan.GetToolTipPosition().Y - VirtualScreenOffset.YOffset;
@@ -128,6 +130,11 @@
         var url = "https://local.data/" + pathEnd;
         return url;
     }
+
+    /// <summary>Whether the last render drew a live scan; reported to show or hide the window.</summary>
+    private bool _drewScan;
+
+    protected override void OnAfterRender(bool firstRender) => RatScannerMain.Instance.OnOverlayRendered(_drewScan);
 
     protected override void OnInitialized() {
         MenuVM.PropertyChanged += PropertyChangeHandler;

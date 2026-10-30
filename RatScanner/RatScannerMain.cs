@@ -689,11 +689,20 @@ public class RatScannerMain : INotifyPropertyChanged {
 	/// </summary>
 	internal void ApplyScanningOverlaySetting() => RefreshOverlay();
 
+	// The overlay window is shown and hidden by the overlay page after it has rendered
+	// (OnOverlayRendered): showing it here, before Blazor drew the new scan, flashed the
+	// previous scan's box, which was the last frame the hidden WebView had painted.
 	private void RefreshOverlay(object? o = null) {
-		SetOverlayVisible(HasLiveScan());
+		if (!RatConfig.Overlay.Scanning.Enable) SetOverlayVisibleRaw(false);
 
 		OnPropertyChanged();
 	}
+
+	/// <summary>
+	/// Called by the overlay page after each render with whether it drew a live scan.
+	/// Hiding only after an empty render means the hidden window never holds a stale box.
+	/// </summary>
+	internal void OnOverlayRendered(bool drewScan) => SetOverlayVisible(drewScan);
 
 	/// <summary>
 	/// Arms a one-shot refresh for when the newest scan expires, so the overlay
