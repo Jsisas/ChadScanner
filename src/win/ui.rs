@@ -185,15 +185,11 @@ fn place(at: (i32, i32), w: i32, h: i32) -> (i32, i32) {
     (x.max(l), y.max(t))
 }
 
+/// Silhouette chad on amber (`assets/tray.svg`); readable at tray size.
 fn tray_icon() -> anyhow::Result<tray_icon::Icon> {
-    let mut rgba = Vec::with_capacity(32 * 32 * 4);
-    for y in 0..32 {
-        for x in 0..32 {
-            let edge = x < 3 || y < 3 || x > 28 || y > 28;
-            rgba.extend_from_slice(if edge { &[0x10, 0x10, 0x10, 255] } else { &[0xFF, 0xB0, 0x20, 255] });
-        }
-    }
-    Ok(tray_icon::Icon::from_rgba(rgba, 32, 32)?)
+    let img = image::load_from_memory(include_bytes!("../../assets/tray-32.png"))?.to_rgba8();
+    let (w, h) = img.dimensions();
+    Ok(tray_icon::Icon::from_rgba(img.into_raw(), w, h)?)
 }
 
 /// Runs the UI message loop on the calling thread until Quit.

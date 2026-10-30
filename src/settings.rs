@@ -417,9 +417,19 @@ impl eframe::App for SettingsApp {
     }
 }
 
+/// The exe icon (`assets/icon.svg`) for the title bar and taskbar.
+fn window_icon() -> egui::IconData {
+    let img = image::load_from_memory(include_bytes!("../assets/icon-64.png")).expect("bundled icon").to_rgba8();
+    let (width, height) = img.dimensions();
+    egui::IconData { rgba: img.into_raw(), width, height }
+}
+
 pub fn run(paths: Paths) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_title("ChadOverlay Settings").with_inner_size([720.0, 640.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_title("ChadOverlay Settings")
+            .with_inner_size([720.0, 640.0])
+            .with_icon(window_icon()),
         ..Default::default()
     };
     eframe::run_native("ChadOverlay Settings", options, Box::new(|_cc| Ok(Box::new(SettingsApp::new(paths)))))
