@@ -609,7 +609,7 @@ public class RatScannerMain : INotifyPropertyChanged {
 			}
 
 			using var crop = screenshot.Clone(new Rectangle(x0, y0, x1 - x0, y1 - y0), PixelFormat.Format24bppRgb);
-			var candidates = vision.Identify(crop, slotsW, slotsH);
+			var candidates = vision.Identify(crop, slotsW, slotsH, screenshot, mouse, scale);
 			report.Crop = (Bitmap)crop.Clone();
 			report.Candidates = [.. candidates.Select(c => new ScanReport.Candidate(c.Id, TarkovDevAPI.GetItems().FirstOrDefault(i => i.Id == c.Id)?.ShortName, c.Score))];
 			if (candidates.Length == 0) {

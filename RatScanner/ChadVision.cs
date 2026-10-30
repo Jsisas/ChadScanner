@@ -25,7 +25,9 @@ internal sealed partial class ChadVision : IDisposable {
 	private static partial IntPtr CvOpen(string dataDir);
 
 	[LibraryImport("chadvision", EntryPoint = "cv_identify")]
-	private static unsafe partial int CvIdentify(IntPtr engine, byte* bgr, uint width, uint height, uint stride, uint slotW, uint slotH, CvCandidate* output, uint cap);
+	private static unsafe partial int CvIdentify(IntPtr engine, byte* bgr, uint width, uint height, uint stride, uint slotW, uint slotH,
+		byte* screenBgr, uint screenWidth, uint screenHeight, uint screenStride, int mouseX, int mouseY, float scale,
+		CvCandidate* output, uint cap);
 
 	[LibraryImport("chadvision", EntryPoint = "cv_close")]
 	private static partial void CvClose(IntPtr engine);
@@ -72,21 +74,27 @@ internal sealed partial class ChadVision : IDisposable {
 	/// <param name="crop">Screenshot region around the item icon</param>
 	/// <param name="slotW">Width of the item in inventory slots</param>
 	/// <param name="slotH">Height of the item in inventory slots</param>
-	internal unsafe (string Id, float Score)[] Identify(Bitmap crop, int slotW, int slotH) {
+	/// <param name="screenshot">Full scan screenshot; EFT's hover tooltip next to the cursor is read for the item name</param>
+	/// <param name="mouse">Cursor position inside <paramref name="screenshot"/></param>
+	/// <param name="scale">RatEye processing scale</param>
+	internal unsafe (string Id, float Score)[] Identify(Bitmap crop, int slotW, int slotH, Bitmap screenshot, Point mouse, float scale) {
 		var candidates = new CvCandidate[MaxCandidates];
 		int count;
 
 		lock (_lock) {
 			if (_engine == IntPtr.Zero) return [];
 
-			var rect = new Rectangle(0, 0, crop.Width, crop.Height);
-			var data = crop.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+			var data = crop.LockBits(new Rectangle(0, 0, crop.Width, crop.Height), ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+			var screen = screenshot.LockBits(new Rectangle(0, 0, screenshot.Width, screenshot.Height), ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
 			try {
 				fixed (CvCandidate* output = candidates) {
 					count = CvIdentify(_engine, (byte*)data.Scan0, (uint)data.Width, (uint)data.Height, (uint)data.Stride,
-						(uint)slotW, (uint)slotH, output, (uint)candidates.Length);
+						(uint)slotW, (uint)slotH,
+						(byte*)screen.Scan0, (uint)screen.Width, (uint)screen.Height, (uint)screen.Stride, mouse.X, mouse.Y, scale,
+						output, (uint)candidates.Length);
 				}
 			} finally {
+				screenshot.UnlockBits(screen);
 				crop.UnlockBits(data);
 			}
 		}
