@@ -31,10 +31,12 @@
                             var mWidth = iconScan.Rotated ? height : width;
                             var mHeight = iconScan.Rotated ? width : height;
                         }
-                        <div style="position: absolute; width: 100%; height: 100%; left: 0px; top: 0px; z-index: -1;">
-                            <img src="@GetIconURL(iconScan)" style="width: @(mWidth)px; height: @(mHeight)px;
-                            background-color: #121212; transform-origin: top left; @iconStyle">
-                        </div>
+                        @if (RatConfig.FloatingTooltip.ShowOverlayItemIcon) {
+                            <div style="position: absolute; width: 100%; height: 100%; left: 0px; top: 0px; z-index: -1;">
+                                <img src="@GetIconURL(iconScan)" style="width: @(mWidth)px; height: @(mHeight)px;
+                                background-color: #121212; transform-origin: top left; @iconStyle">
+                            </div>
+                        }
 
                         <div style="overflow: hidden;">
                             @if (RatConfig.FloatingTooltip.ShowOverlayPrice) {

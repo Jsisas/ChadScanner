@@ -21,7 +21,8 @@ public class ItemIconScan : ItemScan {
 		ItemExtraInfo = icon.ItemExtraInfo;
 		Confidence = confidence;
 		Rotated = icon.Rotated;
-		IconPath = icon.IconPath;
+		// RatEye's icon only matches when ChadVision agreed; otherwise the overlay falls back to item.BaseImageLink.
+		IconPath = icon.Item?.Id == item.Id ? icon.IconPath : string.Empty;
 
 		_toolTipPosition = toolTipPosition;
 		DissapearAt = DateTimeOffset.Now.ToUnixTimeMilliseconds() + duration;

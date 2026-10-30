@@ -125,6 +125,7 @@ internal class SettingsVM : INotifyPropertyChanged {
 	public bool IsFloatingTooltipShowOverlayPrice { get; set; }
 	public bool IsFloatingTooltipShowOverlayTaskBadge { get; set; }
 	public bool IsFloatingTooltipShowOverlayHideoutBadge { get; set; }
+	public bool IsFloatingTooltipShowOverlayItemIcon { get; set; }
 
 	// EFT log tracking
 	public bool EnableLogTracking { get; set; }
@@ -233,6 +234,7 @@ internal class SettingsVM : INotifyPropertyChanged {
 		IsFloatingTooltipShowOverlayPrice = RatConfig.FloatingTooltip.ShowOverlayPrice;
 		IsFloatingTooltipShowOverlayTaskBadge = RatConfig.FloatingTooltip.ShowOverlayTaskBadge;
 		IsFloatingTooltipShowOverlayHideoutBadge = RatConfig.FloatingTooltip.ShowOverlayHideoutBadge;
+		IsFloatingTooltipShowOverlayItemIcon = RatConfig.FloatingTooltip.ShowOverlayItemIcon;
 
 		EnableLogTracking = RatConfig.LogTracking.Enable;
 		LogTrackQuests = RatConfig.LogTracking.TrackQuests;
@@ -420,6 +422,7 @@ internal class SettingsVM : INotifyPropertyChanged {
 		RatConfig.FloatingTooltip.ShowOverlayPrice = IsFloatingTooltipShowOverlayPrice;
 		RatConfig.FloatingTooltip.ShowOverlayTaskBadge = IsFloatingTooltipShowOverlayTaskBadge;
 		RatConfig.FloatingTooltip.ShowOverlayHideoutBadge = IsFloatingTooltipShowOverlayHideoutBadge;
+		RatConfig.FloatingTooltip.ShowOverlayItemIcon = IsFloatingTooltipShowOverlayItemIcon;
 
 		RatConfig.LogTracking.Enable = EnableLogTracking;
 		RatConfig.LogTracking.TrackQuests = LogTrackQuests;

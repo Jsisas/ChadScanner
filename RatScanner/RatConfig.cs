@@ -195,6 +195,7 @@ internal static partial class RatConfig {
 		internal static bool ShowOverlayPrice = true;
 		internal static bool ShowOverlayTaskBadge = true;
 		internal static bool ShowOverlayHideoutBadge = true;
+		internal static bool ShowOverlayItemIcon = false;
 	}
 
 	// Application hotkeys
@@ -348,6 +349,7 @@ internal static partial class RatConfig {
 		FloatingTooltip.ShowOverlayPrice = config.ReadBool(nameof(FloatingTooltip.ShowOverlayPrice), FloatingTooltip.ShowOverlayPrice);
 		FloatingTooltip.ShowOverlayTaskBadge = config.ReadBool(nameof(FloatingTooltip.ShowOverlayTaskBadge), FloatingTooltip.ShowOverlayTaskBadge);
 		FloatingTooltip.ShowOverlayHideoutBadge = config.ReadBool(nameof(FloatingTooltip.ShowOverlayHideoutBadge), FloatingTooltip.ShowOverlayHideoutBadge);
+		FloatingTooltip.ShowOverlayItemIcon = config.ReadBool(nameof(FloatingTooltip.ShowOverlayItemIcon), FloatingTooltip.ShowOverlayItemIcon);
 
 		config.Section = nameof(Hotkeys);
 		Hotkeys.OpenWiki = config.ReadHotkey(nameof(Hotkeys.OpenWiki), Hotkeys.OpenWiki);
@@ -457,6 +459,7 @@ internal static partial class RatConfig {
 		config.WriteBool(nameof(FloatingTooltip.ShowOverlayPrice), FloatingTooltip.ShowOverlayPrice);
 		config.WriteBool(nameof(FloatingTooltip.ShowOverlayTaskBadge), FloatingTooltip.ShowOverlayTaskBadge);
 		config.WriteBool(nameof(FloatingTooltip.ShowOverlayHideoutBadge), FloatingTooltip.ShowOverlayHideoutBadge);
+		config.WriteBool(nameof(FloatingTooltip.ShowOverlayItemIcon), FloatingTooltip.ShowOverlayItemIcon);
 
 		config.Section = nameof(Hotkeys);
 		config.WriteHotkey(nameof(Hotkeys.OpenWiki), Hotkeys.OpenWiki);

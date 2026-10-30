@@ -374,6 +374,7 @@
   "OverlayPrice": "Overlay: show price",
   "OverlayTaskBadge": "Overlay: show task badge",
   "OverlayHideoutBadge": "Overlay: show hideout badge",
+  "OverlayItemIcon": "Overlay: show item icon",
   "HideoutProgress": "Hideout",
   "HideoutProgressHint": "Tarkov does not log hideout builds; set your built levels here."
 }
