@@ -509,19 +509,41 @@ public class RatScannerMain : INotifyPropertyChanged {
 			Vector2 screenshotPosition = new(x, y);
 			Size size = new(RatConfig.IconScan.ScanWidth, RatConfig.IconScan.ScanHeight);
 			var screenshot = GetScreenshot(screenshotPosition, size);
+			var report = new ScanReport {
+				Mouse = position.ToString(),
+				ScreenshotOrigin = screenshotPosition.ToString(),
+				RatEyeScale = RatEyeEngine.Config.ProcessingConfig.Scale,
+				ChadVisionLoaded = Vision != null,
+				Screenshot = (Bitmap)screenshot.Clone(),
+			};
+			ScanReport.Publish(report);
 
 			// Scan the item
 			var inventory = RatEyeEngine.NewInventory(screenshot);
 			var icon = inventory.LocateIcon();
 
-			if (icon?.DetectionConfidence <= 0 || icon?.Item == null) return;
+			if (icon?.DetectionConfidence <= 0 || icon?.Item == null) {
+				report.Outcome = "RatEye located no icon; nothing shown";
+				return;
+			}
+			report.RatEyeFound = true;
+			report.RatEyeIconPosition = icon.Position.ToString();
+			report.RatEyeIconSize = icon.Size.ToString();
+			report.RatEyeItemPosition = icon.ItemPosition.ToString();
+			report.RatEyeRotated = icon.Rotated;
+			report.RatEyeConfidence = icon.DetectionConfidence;
+			report.RatEyeItemId = icon.Item.Id;
+			report.RatEyeItemShortName = icon.Item.ShortName;
 
 			var toolTipPosition = position;
 			toolTipPosition += icon.Position + icon.ItemPosition;
 			toolTipPosition -= new Vector2(RatConfig.IconScan.ScanWidth, RatConfig.IconScan.ScanHeight) / 2;
 
-			ItemIconScan? visionScan = RatConfig.IconScan.UseChadVision ? IdentifyWithVision(screenshot, icon, toolTipPosition) : null;
+			ItemIconScan? visionScan = RatConfig.IconScan.UseChadVision ? IdentifyWithVision(screenshot, icon, toolTipPosition, report) : null;
+			if (!RatConfig.IconScan.UseChadVision) report.Outcome = "RatEye (ChadVision disabled in settings)";
 			ItemIconScan tempIconScan = visionScan ?? new(icon, toolTipPosition, RatConfig.ToolTip.Duration);
+			report.ShownItemId = tempIconScan.Item.Id;
+			report.ShownItemShortName = tempIconScan.Item.ShortName;
 
 			ItemScans.Enqueue(tempIconScan);
 			RefreshOverlay();
@@ -532,9 +554,12 @@ public class RatScannerMain : INotifyPropertyChanged {
 	/// Re-identifies the icon RatEye located using ChadVision.
 	/// </summary>
 	/// <returns>The scan, or <see langword="null"/> when ChadVision is unavailable or has no known match</returns>
-	private ItemIconScan? IdentifyWithVision(Bitmap screenshot, RatEye.Processing.Icon icon, Vector2 toolTipPosition) {
+	private ItemIconScan? IdentifyWithVision(Bitmap screenshot, RatEye.Processing.Icon icon, Vector2 toolTipPosition, ScanReport report) {
 		var vision = Vision;
-		if (vision == null) return null;
+		if (vision == null) {
+			report.Outcome = "RatEye (ChadVision not loaded)";
+			return null;
+		}
 
 		try {
 			// Same padding rule as ChadVision's dataset::padded_crop
@@ -547,29 +572,34 @@ public class RatScannerMain : INotifyPropertyChanged {
 			var y0 = Math.Max(0, icon.Position.Y - pad);
 			var x1 = Math.Min(screenshot.Width, icon.Position.X + icon.Size.X + pad);
 			var y1 = Math.Min(screenshot.Height, icon.Position.Y + icon.Size.Y + pad);
-			if (x1 <= x0 || y1 <= y0) return null;
+			report.CropRect = $"{x0},{y0},{x1 - x0},{y1 - y0}";
+			report.Slots = $"{slotsW}x{slotsH}";
+			if (x1 <= x0 || y1 <= y0) {
+				report.Outcome = "RatEye (empty crop)";
+				return null;
+			}
 
 			using var crop = screenshot.Clone(new Rectangle(x0, y0, x1 - x0, y1 - y0), PixelFormat.Format24bppRgb);
 			var candidates = vision.Identify(crop, slotsW, slotsH);
-			Logger.LogDebugBitmap(screenshot, "scan-screenshot");
-			Logger.LogDebugBitmap(crop, "scan-chadvision-crop");
-			Logger.LogDebug($"ChadVision crop {x0},{y0} {x1 - x0}x{y1 - y0} slots {slotsW}x{slotsH} (RatEye icon {icon.Position} size {icon.Size}, RatEye guess {icon.Item?.ShortName}); top: "
-				+ string.Join(", ", candidates.Take(3).Select(c => $"{TarkovDevAPI.GetItems().FirstOrDefault(i => i.Id == c.Id)?.ShortName ?? c.Id} {c.Score:0.000}")));
+			report.Crop = (Bitmap)crop.Clone();
+			report.Candidates = [.. candidates.Select(c => new ScanReport.Candidate(c.Id, TarkovDevAPI.GetItems().FirstOrDefault(i => i.Id == c.Id)?.ShortName, c.Score))];
 			if (candidates.Length == 0) {
-				Logger.LogDebug("ChadVision returned no candidates, falling back to RatEye");
+				report.Outcome = "RatEye (ChadVision returned no candidates)";
 				return null;
 			}
 
 			var (id, score) = candidates[0];
 			var item = TarkovDevAPI.GetItems().FirstOrDefault(i => i.Id == id);
 			if (item == null) {
-				Logger.LogDebug($"ChadVision id {id} not in tarkov.dev items, falling back to RatEye");
+				report.Outcome = $"RatEye (ChadVision id {id} not in tarkov.dev items)";
 				return null;
 			}
+			report.Outcome = "ChadVision";
 
 			return new ItemIconScan(icon, item, score, toolTipPosition, RatConfig.ToolTip.Duration);
 		} catch (Exception e) {
 			Logger.LogWarning("ChadVision scan failed, falling back to RatEye", e);
+			report.Outcome = "RatEye (ChadVision threw: " + e.Message + ")";
 			return null;
 		}
 	}

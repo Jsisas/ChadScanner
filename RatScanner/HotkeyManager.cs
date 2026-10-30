@@ -22,6 +22,7 @@ internal partial class HotkeyManager {
 	internal ActiveHotkey OpenWikiHotkey;
 	internal ActiveHotkey OpenTarkovDevHotkey;
 	internal ActiveHotkey OpenMapHotkey;
+	internal ActiveHotkey ScanReportHotkey;
 
 	/// <summary>
 	/// Raised when the open-map hotkey fires. The interactable overlay subscribes
@@ -76,6 +77,8 @@ internal partial class HotkeyManager {
 		OpenWikiHotkey = new ActiveHotkey(Hotkeys.OpenWiki, OnOpenWikiHotkey);
 		OpenTarkovDevHotkey = new ActiveHotkey(Hotkeys.OpenTarkovDev, OnOpenTarkovDevHotkey);
 		OpenMapHotkey = new ActiveHotkey(Hotkeys.OpenMap, OnOpenMapHotkey);
+		// Hidden on purpose (not in settings): saves the last scan for offline debugging.
+		ScanReportHotkey = new ActiveHotkey(new Hotkey([System.Windows.Input.Key.LeftCtrl, System.Windows.Input.Key.LeftShift, System.Windows.Input.Key.F12]), OnScanReportHotkey);
 	}
 
 	/// <summary>
@@ -89,6 +92,7 @@ internal partial class HotkeyManager {
 		OpenWikiHotkey?.Dispose();
 		OpenTarkovDevHotkey?.Dispose();
 		OpenMapHotkey?.Dispose();
+		ScanReportHotkey?.Dispose();
 	}
 
 	private static void Wrap(Action action) {
@@ -114,6 +118,19 @@ internal partial class HotkeyManager {
 	private void OnIconScanHotkey(object? sender, KeyUpEventArgs e) {
 		if (!IsForegroundAllowed(false)) return;
 		Wrap(() => RatScannerMain.Instance.IconScan(UserActivityHelper.GetMousePosition()));
+	}
+
+	private void OnScanReportHotkey(object? sender, KeyUpEventArgs e) {
+		Wrap(() => {
+			var dir = ScanReport.SaveLast();
+			if (dir == null) {
+				Logger.LogInfo("Scan report hotkey: no scan to save yet");
+				System.Media.SystemSounds.Hand.Play();
+				return;
+			}
+			Logger.LogInfo("Scan report saved to " + dir);
+			System.Media.SystemSounds.Asterisk.Play();
+		});
 	}
 
 	private void OnOpenInteractableOverlayHotkey(object? sender, KeyUpEventArgs e) {
