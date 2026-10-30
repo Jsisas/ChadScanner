@@ -67,7 +67,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="Native\*.dll" CopyToOutputDirectory="PreserveNewest" />
+		<None Include="Native\*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 
 	<ItemGroup>
