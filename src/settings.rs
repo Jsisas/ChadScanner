@@ -1,21 +1,64 @@
 //! Settings window (`chadoverlay.exe --settings`), a separate process started from the tray.
-//! Saving writes `config.json`; the running overlay picks it up within a second.
-use crate::config::{Config, Hotkey, Mode, Paths, Source};
+//! Every change is saved to `config.json` at once; the running overlay picks it up within a second.
+use crate::config::{Config, Goal, Hotkey, Mode, Paths, Source};
 use crate::data::{self, Catalog};
 use crate::progress::{LocalSource, ProgressSource, TrackerSource};
-use eframe::egui;
+use eframe::egui::{self, RichText};
 use std::sync::Arc;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Page {
+    Card,
+    Progress,
+    Hideout,
+    Scanning,
+    Logs,
+    About,
+}
+
+impl Page {
+    const ALL: [Page; 6] = [Page::Card, Page::Progress, Page::Hideout, Page::Scanning, Page::Logs, Page::About];
+
+    fn label(self) -> &'static str {
+        match self {
+            Page::Card => "Card",
+            Page::Progress => "Progress",
+            Page::Hideout => "Hideout",
+            Page::Scanning => "Scanning",
+            Page::Logs => "EFT logs",
+            Page::About => "About",
+        }
+    }
+}
 
 struct SettingsApp {
     paths: Paths,
+    page: Page,
     cfg: Config,
+    /// What is on disk, to save only real changes (token encryption differs on every call).
+    saved: Config,
     tokens: [String; 3],
+    saved_tokens: [String; 3],
     token_status: [String; 3],
     local: LocalSource,
     catalog: Option<Catalog>,
     level: u8,
     faction: String,
     status: String,
+}
+
+fn hint(ui: &mut egui::Ui, text: &str) {
+    ui.label(RichText::new(text).small().weak());
+}
+
+fn section(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::Ui)) {
+    ui.add_space(6.0);
+    egui::Frame::group(ui.style()).inner_margin(10.0).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(RichText::new(title).strong().size(15.0));
+        ui.add_space(4.0);
+        body(ui);
+    });
 }
 
 impl SettingsApp {
@@ -26,7 +69,10 @@ impl SettingsApp {
             local: LocalSource::open(paths.progress(), cfg.mode),
             catalog: data::load_cached(&paths.cache(), cfg.mode),
             paths,
+            page: Page::Card,
+            saved: cfg.clone(),
             cfg,
+            saved_tokens: tokens.clone(),
             tokens,
             token_status: Default::default(),
             level: 1,
@@ -50,135 +96,164 @@ impl SettingsApp {
         self.load_profile();
     }
 
-    fn save(&mut self) {
-        for (i, m) in Mode::ALL.into_iter().enumerate() {
-            if let Err(e) = self.cfg.set_token(m, &self.tokens[i]) {
-                self.status = format!("Token encryption failed: {e:#}");
-                return;
+    fn mode_index(&self) -> usize {
+        Mode::ALL.iter().position(|m| *m == self.cfg.mode).unwrap_or(0)
+    }
+
+    /// Writes config.json when anything changed since the last save.
+    fn autosave(&mut self) {
+        if self.cfg == self.saved && self.tokens == self.saved_tokens {
+            return;
+        }
+        if self.tokens != self.saved_tokens {
+            for (i, m) in Mode::ALL.into_iter().enumerate() {
+                if let Err(e) = self.cfg.set_token(m, &self.tokens[i]) {
+                    self.status = format!("Token encryption failed: {e:#}");
+                    return;
+                }
             }
         }
         self.status = match self.cfg.save(&self.paths.config()) {
-            Ok(()) => "Saved".into(),
+            Ok(()) => {
+                self.saved = self.cfg.clone();
+                self.saved_tokens = self.tokens.clone();
+                "Saved – the overlay uses it right away".into()
+            }
             Err(e) => format!("Save failed: {e:#}"),
         };
     }
 
     fn tracker(&self) -> Option<Arc<TrackerSource>> {
-        let token = self.tokens[Mode::ALL.iter().position(|m| *m == self.cfg.mode)?].trim().to_owned();
+        let token = self.tokens[self.mode_index()].trim().to_owned();
         if token.is_empty() {
             return None;
         }
         TrackerSource::start(self.cfg.mode, token, self.paths.pending(), Arc::new(|_: &str, _: &str| {})).ok()
     }
 
-    fn profile(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("Player level");
-            ui.add(egui::DragValue::new(&mut self.level).range(1..=79));
-            if ui.button("Set").clicked() {
-                let r = match self.cfg.source {
-                    Source::Local => self.local.set_level(self.level),
-                    Source::Tracker => match self.tracker() {
-                        Some(t) => t.set_level(self.level),
-                        None => Err(anyhow::anyhow!("no token for {}", self.cfg.mode.label())),
-                    },
-                };
-                self.status = r.map(|()| format!("Level {} saved", self.level)).unwrap_or_else(|e| format!("{e:#}"));
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Faction");
-            let enabled = self.cfg.source == Source::Local;
-            ui.add_enabled_ui(enabled, |ui| {
-                for f in ["USEC", "BEAR"] {
-                    if ui.selectable_label(self.faction == f, f).clicked() {
-                        self.faction = f.into();
-                        self.status = match self.local.set_faction(Some(f)) {
-                            Ok(()) => format!("Faction {f} saved"),
-                            Err(e) => format!("{e:#}"),
-                        };
-                    }
-                }
-            });
-            if !enabled {
-                ui.label("(from TarkovTracker)");
-            }
-        });
-    }
+    // ---------------------------------------------------------------- pages
 
-    fn hideout(&mut self, ui: &mut egui::Ui) {
-        if self.cfg.source != Source::Local {
-            ui.label("TarkovTracker's API has no hideout write; edit the hideout on tarkovtracker.org.");
-            return;
-        }
-        let Some(cat) = &self.catalog else {
-            ui.label("No item data cached yet; start the overlay once with internet access.");
-            return;
-        };
-        let built = self.local.snapshot().hideout_modules.clone();
-        let mut change = None;
-        egui::Grid::new("hideout").striped(true).show(ui, |ui| {
-            for s in &cat.stations {
-                let max = s.levels.iter().map(|l| l.level).max().unwrap_or(0);
-                let mut level = s.levels.iter().filter(|l| built.contains(&l.id)).map(|l| l.level).max().unwrap_or(0);
-                ui.label(&s.name);
-                if ui.add(egui::DragValue::new(&mut level).range(0..=max)).changed() {
-                    change = Some((s.id.clone(), level));
-                }
-                ui.label(format!("/ {max}"));
-                ui.end_row();
-            }
-        });
-        if let Some((id, level)) = change {
-            if let Err(e) = self.local.set_hideout_level(&id, level) {
-                self.status = format!("{e:#}");
-            }
-        }
-    }
-}
-
-impl eframe::App for SettingsApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Panel::bottom("actions").show(ui, |ui| {
+    fn card_page(&mut self, ui: &mut egui::Ui) {
+        let c = &mut self.cfg;
+        section(ui, "What the card shows", |ui| {
             ui.horizontal(|ui| {
-                if ui.button("Save").clicked() {
-                    self.save();
-                }
-                ui.label(&self.status);
+                ui.checkbox(&mut c.show_quests, "Quests");
+                ui.checkbox(&mut c.show_hideout, "Hideout upgrades");
+                ui.checkbox(&mut c.show_barters, "Barters");
+                ui.checkbox(&mut c.show_crafts, "Crafts");
             });
+            ui.checkbox(&mut c.show_non_fir, "Include needs that don't have to be found in raid");
+            hint(ui, "Off: only FIR needs are counted and listed.");
+            ui.horizontal(|ui| {
+                ui.label("Rows");
+                ui.add(egui::Slider::new(&mut c.max_rows, 0..=15));
+            });
+            hint(ui, "Quest and hideout rows on the card; the rest is summed up as \"+n× in k more\".");
         });
-        egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.heading("Game");
-                ui.horizontal(|ui| {
-                    ui.label("Game mode");
-                    for m in Mode::ALL {
-                        if ui.selectable_label(self.cfg.mode == m, m.label()).clicked() && self.cfg.mode != m {
-                            self.switch_mode(m);
-                        }
-                    }
-                });
 
-                ui.separator();
-                ui.heading("Progress");
+        section(ui, "Order", |ui| {
+            ui.radio_value(&mut c.smart_ordering, true, "Smart (recommended)");
+            hint(ui, "Closest first: what you can do now, then the fewest quests, upgrades or levels away.");
+            ui.radio_value(&mut c.smart_ordering, false, "Simple");
+            hint(ui, "Biggest count first.");
+        });
+
+        section(ui, "Goal", |ui| {
+            ui.horizontal(|ui| {
+                for g in Goal::ALL {
+                    ui.radio_value(&mut c.goal, g, g.label());
+                }
+            });
+            hint(ui, "Kappa / Lightkeeper: other quests move to the bottom under \"NOT KAPPA\".");
+        });
+
+        section(ui, "Look and behaviour", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Size");
+                ui.add(egui::Slider::new(&mut c.ui_scale, 0.75..=2.0).fixed_decimals(2).suffix("×"));
+            });
+            ui.checkbox(&mut c.close_on_leave, "Close when the mouse leaves the item");
+            ui.horizontal(|ui| {
+                ui.label("Close after");
+                ui.add(egui::Slider::new(&mut c.tooltip_seconds, 0.0..=30.0).fixed_decimals(0).suffix(" s"));
+            });
+            hint(ui, "0 s = no timeout; the next scan replaces the card anyway.");
+        });
+    }
+
+    fn progress_page(&mut self, ui: &mut egui::Ui) {
+        section(ui, "Where your progress is kept", |ui| {
+            ui.radio_value(&mut self.cfg.source, Source::Local, "On this PC");
+            hint(ui, "A local file in TarkovTracker backup format. Finished tasks are filled in from EFT's logs; set level, faction and hideout here.");
+            ui.radio_value(&mut self.cfg.source, Source::Tracker, "TarkovTracker.org");
+            hint(ui, "Reads and writes your tarkovtracker.org progress with an API token. Items you mark there lower the counts on the card.");
+        });
+
+        if self.cfg.source == Source::Tracker {
+            section(ui, "TarkovTracker tokens", |ui| {
                 ui.horizontal(|ui| {
-                    ui.radio_value(&mut self.cfg.source, Source::Local, "Local file");
-                    ui.radio_value(&mut self.cfg.source, Source::Tracker, "TarkovTracker");
+                    hint(ui, "Create one per game mode at");
+                    ui.hyperlink_to(RichText::new("tarkovtracker.org > Settings > API").small(), "https://tarkovtracker.org/settings");
+                    hint(ui, "(needs read + write).");
                 });
-                for (i, m) in Mode::ALL.into_iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("{} token", m.label()));
-                        ui.add(egui::TextEdit::singleline(&mut self.tokens[i]).password(true).desired_width(260.0));
-                        if ui.button("Test").clicked() {
+                egui::Grid::new("tokens").num_columns(4).spacing([8.0, 6.0]).show(ui, |ui| {
+                    for (i, m) in Mode::ALL.into_iter().enumerate() {
+                        let label = if m == self.cfg.mode { RichText::new(m.label()).strong() } else { RichText::new(m.label()) };
+                        ui.label(label);
+                        ui.add(egui::TextEdit::singleline(&mut self.tokens[i]).password(true).desired_width(240.0).hint_text("paste token"));
+                        if ui.add_enabled(!self.tokens[i].trim().is_empty(), egui::Button::new("Test")).clicked() {
                             self.token_status[i] = match crate::progress::test_token(self.tokens[i].trim()) {
-                                Ok((perms, mode)) => format!("OK: {} · {mode}", perms.join(",")),
+                                Ok((perms, mode)) => format!("OK: {mode}, {}", perms.join(" ")),
                                 Err(e) => format!("Failed: {e}"),
                             };
                         }
                         ui.label(&self.token_status[i]);
-                    });
+                        ui.end_row();
+                    }
+                });
+                hint(ui, "Only the token of the current game mode is used. Tokens are stored encrypted for your Windows user.");
+            });
+        }
+
+        section(ui, "Player", |ui| {
+            let local = self.cfg.source == Source::Local;
+            ui.horizontal(|ui| {
+                ui.label("Level");
+                let changed = ui.add(egui::DragValue::new(&mut self.level).range(1..=79)).changed();
+                if local && changed {
+                    self.status = match self.local.set_level(self.level) {
+                        Ok(()) => format!("Level {} saved", self.level),
+                        Err(e) => format!("{e:#}"),
+                    };
                 }
-                self.profile(ui);
+                if !local && ui.button("Send to TarkovTracker").clicked() {
+                    self.status = match self.tracker() {
+                        Some(t) => t.set_level(self.level).map(|()| format!("Level {} sent", self.level)).unwrap_or_else(|e| format!("{e:#}")),
+                        None => format!("No token for {}", self.cfg.mode.label()),
+                    };
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Faction");
+                if local {
+                    for f in ["USEC", "BEAR"] {
+                        if ui.radio(self.faction == f, f).clicked() && self.faction != f {
+                            self.faction = f.into();
+                            self.status = match self.local.set_faction(Some(f)) {
+                                Ok(()) => format!("Faction {f} saved"),
+                                Err(e) => format!("{e:#}"),
+                            };
+                        }
+                    }
+                } else {
+                    hint(ui, "read from TarkovTracker");
+                }
+            });
+            hint(ui, "Level and faction decide which quests you can take now.");
+        });
+
+        if self.cfg.source == Source::Local {
+            section(ui, "Backup", |ui| {
                 ui.horizontal(|ui| {
                     if ui.button("Import TarkovTracker backup…").clicked() {
                         if let Some(file) = rfd::FileDialog::new().add_filter("TarkovTracker backup", &["json"]).pick_file() {
@@ -191,58 +266,152 @@ impl eframe::App for SettingsApp {
                             };
                         }
                     }
-                });
-
-                ui.separator();
-                ui.heading("Scanning");
-                egui::ComboBox::from_label("Scan hotkey").selected_text(self.cfg.hotkey.label()).show_ui(ui, |ui| {
-                    for h in Hotkey::ALL {
-                        ui.selectable_value(&mut self.cfg.hotkey, h, h.label());
+                    if ui.button("Show progress file").clicked() {
+                        let _ = std::process::Command::new("explorer.exe").arg("/select,").arg(self.paths.progress()).spawn();
                     }
                 });
-                ui.checkbox(&mut self.cfg.close_on_leave, "Close tooltip when the mouse leaves the item");
-                ui.add(egui::Slider::new(&mut self.cfg.tooltip_seconds, 0.0..=30.0).text("Tooltip timeout, s (0 = none)"));
-                ui.add(egui::Slider::new(&mut self.cfg.ui_scale, 0.75..=2.0).text("UI scale"));
-                ui.checkbox(&mut self.cfg.show_non_fir, "Show non-FIR needs");
-                ui.horizontal(|ui| {
-                    ui.label("Show on card:");
-                    ui.checkbox(&mut self.cfg.show_quests, "Quests");
-                    ui.checkbox(&mut self.cfg.show_hideout, "Hideout");
-                    ui.checkbox(&mut self.cfg.show_barters, "Barters");
-                    ui.checkbox(&mut self.cfg.show_crafts, "Crafts");
-                });
-                ui.add(egui::Slider::new(&mut self.cfg.max_rows, 0..=15).text("Quest/hideout rows"));
-                ui.checkbox(&mut self.cfg.smart_ordering, "Smart ordering")
-                    .on_hover_text("Active and available tasks, then buildable hideout, then the rest; closest to done and fewest levels away first. Off: quests then hideout, biggest count first.");
-                egui::ComboBox::from_label("Goal").selected_text(self.cfg.goal.label()).show_ui(ui, |ui| {
-                    for g in crate::config::Goal::ALL {
-                        ui.selectable_value(&mut self.cfg.goal, g, g.label());
+                hint(ui, "progress.json can be imported at tarkovtracker.org > Settings > Import.");
+            });
+        }
+    }
+
+    fn hideout_page(&mut self, ui: &mut egui::Ui) {
+        if self.cfg.source != Source::Local {
+            section(ui, "Hideout", |ui| {
+                ui.label("Your hideout comes from TarkovTracker. Its API cannot change the hideout, so edit it on tarkovtracker.org.");
+            });
+            return;
+        }
+        let Some(cat) = &self.catalog else {
+            section(ui, "Hideout", |ui| {
+                ui.label("No item data yet. Start the overlay once with internet access.");
+            });
+            return;
+        };
+        let built = self.local.snapshot().hideout_modules.clone();
+        let mut change = None;
+        section(ui, "Built levels", |ui| {
+            hint(ui, "EFT's logs don't record upgrades, so set them here. Built levels stop counting on the card.");
+            ui.add_space(4.0);
+            egui::Grid::new("hideout").striped(true).num_columns(3).spacing([16.0, 4.0]).show(ui, |ui| {
+                for s in &cat.stations {
+                    let max = s.levels.iter().map(|l| l.level).max().unwrap_or(0);
+                    let mut level = s.levels.iter().filter(|l| built.contains(&l.id)).map(|l| l.level).max().unwrap_or(0);
+                    ui.label(&s.name);
+                    if ui.add(egui::Slider::new(&mut level, 0..=max).integer()).changed() {
+                        change = Some((s.id.clone(), level));
                     }
-                });
+                    ui.label(if level == max { RichText::new("max").weak() } else { RichText::new("") });
+                    ui.end_row();
+                }
+            });
+        });
+        if let Some((id, level)) = change {
+            if let Err(e) = self.local.set_hideout_level(&id, level) {
+                self.status = format!("{e:#}");
+            }
+        }
+    }
 
-                ui.separator();
-                ui.heading("EFT logs");
-                ui.checkbox(&mut self.cfg.log_tracking, "Track quests from EFT logs");
-                ui.horizontal(|ui| {
-                    ui.label("Logs folder override");
-                    ui.text_edit_singleline(&mut self.cfg.logs_override);
-                });
+    fn scanning_page(&mut self, ui: &mut egui::Ui) {
+        section(ui, "Scan button", |ui| {
+            egui::ComboBox::from_id_salt("hotkey").selected_text(self.cfg.hotkey.label()).show_ui(ui, |ui| {
+                for h in Hotkey::ALL {
+                    ui.selectable_value(&mut self.cfg.hotkey, h, h.label());
+                }
+            });
+            hint(ui, "Works only while Escape from Tarkov is the active window. The click still reaches the game.");
+        });
+        section(ui, "Game", |ui| {
+            hint(ui, "Run EFT in Borderless mode; the card cannot be drawn over exclusive fullscreen. Pause scanning from the tray icon.");
+        });
+    }
 
-                ui.separator();
-                ui.collapsing("Hideout", |ui| self.hideout(ui));
+    fn logs_page(&mut self, ui: &mut egui::Ui) {
+        section(ui, "Quest tracking from EFT logs", |ui| {
+            ui.checkbox(&mut self.cfg.log_tracking, "Mark tasks completed / failed and switch game mode automatically");
+            hint(ui, "Tasks finished while the overlay was closed are caught up at the next start.");
+        });
+        section(ui, "Logs folder", |ui| {
+            match crate::eftlog::default_logs_dir(&self.cfg.logs_override) {
+                Some(dir) => ui.label(format!("Using {}", dir.display())),
+                None => ui.colored_label(egui::Color32::LIGHT_RED, "Not found – choose the Logs folder in your EFT install."),
+            };
+            ui.horizontal(|ui| {
+                if ui.button("Choose folder…").clicked() {
+                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                        self.cfg.logs_override = dir.display().to_string();
+                    }
+                }
+                if !self.cfg.logs_override.is_empty() && ui.button("Detect automatically").clicked() {
+                    self.cfg.logs_override.clear();
+                }
+            });
+        });
+    }
 
-                ui.separator();
+    fn about_page(&mut self, ui: &mut egui::Ui) {
+        section(ui, "ChadOverlay", |ui| {
+            ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+            hint(ui, "Item data: json.tarkov.dev · Recognition: ChadVision");
+            ui.horizontal(|ui| {
                 if ui.button("Open log file").clicked() {
                     let _ = std::process::Command::new("notepad.exe").arg(self.paths.log()).spawn();
+                }
+                if ui.button("Open settings folder").clicked() {
+                    let _ = std::process::Command::new("explorer.exe").arg(&self.paths.appdata).spawn();
                 }
             });
         });
     }
 }
 
+impl eframe::App for SettingsApp {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::Panel::top("mode").show(ui, |ui| {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Game mode").strong());
+                for m in Mode::ALL {
+                    if ui.selectable_label(self.cfg.mode == m, m.label()).clicked() && self.cfg.mode != m {
+                        self.switch_mode(m);
+                    }
+                }
+                hint(ui, "switches by itself when EFT starts a session");
+            });
+            ui.add_space(6.0);
+        });
+        egui::Panel::bottom("status").show(ui, |ui| {
+            ui.add_space(4.0);
+            ui.label(RichText::new(&self.status).weak());
+            ui.add_space(4.0);
+        });
+        egui::Panel::left("nav").resizable(false).exact_size(120.0).show(ui, |ui| {
+            ui.add_space(8.0);
+            for p in Page::ALL {
+                let text = RichText::new(p.label()).size(15.0);
+                if ui.add_sized([108.0, 28.0], egui::Button::selectable(self.page == p, text)).clicked() {
+                    self.page = p;
+                }
+            }
+        });
+        egui::CentralPanel::default().show(ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| match self.page {
+                Page::Card => self.card_page(ui),
+                Page::Progress => self.progress_page(ui),
+                Page::Hideout => self.hideout_page(ui),
+                Page::Scanning => self.scanning_page(ui),
+                Page::Logs => self.logs_page(ui),
+                Page::About => self.about_page(ui),
+            });
+        });
+        self.autosave();
+    }
+}
+
 pub fn run(paths: Paths) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_title("ChadOverlay Settings").with_inner_size([620.0, 760.0]),
+        viewport: egui::ViewportBuilder::default().with_title("ChadOverlay Settings").with_inner_size([720.0, 640.0]),
         ..Default::default()
     };
     eframe::run_native("ChadOverlay Settings", options, Box::new(|_cc| Ok(Box::new(SettingsApp::new(paths)))))
