@@ -1,0 +1,41 @@
+[package]
+name = "chadoverlay"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chadvision = { path = "../ChadVision", default-features = false }
+image = { version = "0.25", default-features = false }
+tiny-skia = "0.11"
+ab_glyph = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "2", default-features = false, features = ["json", "gzip", "native-tls"] }
+native-tls = "0.2"
+regex = "1"
+notify = "8"
+directories = "5"
+log = "0.4"
+simplelog = "0.12"
+anyhow = "1"
+
+[target.'cfg(windows)'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts"] }
+rfd = "0.15"
+tray-icon = "0.21"
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Threading",
+    "Win32_System_LibraryLoader",
+    "Win32_System_ProcessStatus",
+    "Win32_UI_HiDpi",
+    "Win32_Security",
+    "Win32_Security_Cryptography",
+    "Win32_System_Registry",
+] }
+
+[profile.release]
+debug = 1
