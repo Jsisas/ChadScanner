@@ -116,9 +116,19 @@ public partial class FloatingTooltip : Window {
 			}
 		}
 
+		// Width/Height are NaN before the first layout and the previous item's size afterwards
+		// (SizeToContent), so measure the new content before placing the window.
+		var content = (FrameworkElement)Content;
+		content.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+		var size = content.DesiredSize;
+
+		// Mouse and screen size are physical pixels; Left/Top are DIPs.
+		var dpi = RatConfig.ScreenScale > 0 ? RatConfig.ScreenScale : 1f;
 		var mousePosition = UserActivityHelper.GetMousePosition();
-		Top = Math.Min(RatConfig.ScreenHeight, mousePosition.Y - MouseMovementUntilHide + Height) - Height;
-		Left = Math.Min(RatConfig.ScreenWidth, mousePosition.X - MouseMovementUntilHide + Width) - Width;
+		var screenWidth = RatConfig.ScreenWidth / dpi;
+		var screenHeight = RatConfig.ScreenHeight / dpi;
+		Top = Math.Max(0, Math.Min(screenHeight, mousePosition.Y / dpi - MouseMovementUntilHide + size.Height) - size.Height);
+		Left = Math.Max(0, Math.Min(screenWidth, mousePosition.X / dpi - MouseMovementUntilHide + size.Width) - size.Width);
 
 		Show();
 	}
