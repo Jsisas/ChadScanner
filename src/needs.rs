@@ -32,6 +32,7 @@ pub struct TaskNeed {
     /// Unfinished tasks in the prerequisite chain.
     pub missing_prereqs: u32,
     pub min_level: u32,
+    pub kappa: bool,
 }
 
 impl TaskNeed {
@@ -344,6 +345,7 @@ pub fn quest_needs(cat: &Catalog, item_id: &str, p: &Progress, show_non_fir: boo
             fir,
             missing_prereqs: missing_prereqs(task, cat, p),
             min_level: task.min_player_level,
+            kappa: task.kappa_required,
         });
     }
     let rank = |t: &TaskNeed| match t.gate {
@@ -439,7 +441,7 @@ pub fn hideout_needs(cat: &Catalog, item_id: &str, p: &Progress) -> Vec<HideoutN
 
 /// (barters, crafts) that take the item as an input.
 pub fn recipes_using(cat: &Catalog, item_id: &str) -> (usize, usize) {
-    let uses = |r: &&crate::data::Recipe| r.required_items.iter().any(|i| i == item_id);
+    let uses = |r: &&crate::data::Recipe| r.inputs.iter().any(|(i, _)| i == item_id);
     (cat.barters.iter().filter(uses).count(), cat.crafts.iter().filter(uses).count())
 }
 

@@ -212,6 +212,11 @@ impl eframe::App for SettingsApp {
                     ui.checkbox(&mut self.cfg.show_crafts, "Crafts");
                 });
                 ui.add(egui::Slider::new(&mut self.cfg.max_rows, 0..=15).text("Quest/hideout rows"));
+                ui.horizontal(|ui| {
+                    ui.label("Buy later (non-FIR) when obtainable now for at most");
+                    ui.add(egui::DragValue::new(&mut self.cfg.buy_later_max).range(0..=1_000_000).speed(1000).suffix(" ₽"));
+                    ui.label("(0 = always keep)");
+                });
 
                 ui.separator();
                 ui.heading("EFT logs");
