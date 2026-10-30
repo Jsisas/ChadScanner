@@ -83,8 +83,19 @@ cp "data/refs/catalog.json" "$DATA/refs/"
 cp -r data/refs/base "$DATA/refs/"
 cp -r data/models data/index "$DATA/"
 
+step "Preparing RatScanner icon data (RatScannerData)"
+# RatEye needs Data/icons; upstream CI ships it from this release. Cached in temp/ (gitignored).
+RS_DATA_ZIP="$RS/temp/RatScannerData.zip"
+if [[ $REFRESH -eq 1 || ! -f "$RS_DATA_ZIP" ]]; then
+	mkdir -p "$RS/temp"
+	curl -fsSL -o "$RS_DATA_ZIP.part" "https://github.com/RatScanner/RatScannerData/releases/latest/download/Data.zip"
+	mv "$RS_DATA_ZIP.part" "$RS_DATA_ZIP"
+fi
+unzip -q -o "$RS_DATA_ZIP" -d "$RS/RatScanner/Data"
+
 step "Publishing RatScanner to $OUT"
-if command -v tasklist.exe >/dev/null && tasklist.exe 2>/dev/null | grep -qi '^RatScanner.exe'; then
+TASKLIST="$(command -v tasklist.exe || echo /mnt/c/Windows/System32/tasklist.exe)"
+if [[ -x "$TASKLIST" ]] && "$TASKLIST" 2>/dev/null | grep -qi '^RatScanner.exe'; then
 	die "RatScanner.exe is running on Windows; close it first (files would be locked)"
 fi
 mkdir -p "$OUT"
