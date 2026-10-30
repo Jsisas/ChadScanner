@@ -25,11 +25,13 @@ public partial class FloatingTooltip : Window {
 	private const int MouseMovementUntilHide = 10;
 
 	private Vector2? _mouseStartPosition;
+	private readonly MenuVM _vm;
 
 	private FloatingTooltip() {
 		InitializeComponent();
 		Hide();
-		DataContext = new MenuVM(RatScannerMain.Instance);
+		_vm = new MenuVM(RatScannerMain.Instance);
+		DataContext = _vm;
 		RatScannerMain.Instance.ItemScans.Enqueued += OnItemScanEnqueued;
 		UpdateElements();
 	}
@@ -54,6 +56,15 @@ public partial class FloatingTooltip : Window {
 
 	private void HideTooltip() {
 		_mouseStartPosition = null;
+		if (!IsVisible) return;
+		// A transparent window re-presents its last rendered frame when shown again, so render
+		// it empty before hiding; otherwise the next scan flashes the previous item first.
+		DataContext = null;
+		TaskItemList.Children.Clear();
+		HideoutItems.Children.Clear();
+		BarterItemList.Children.Clear();
+		CraftItemList.Children.Clear();
+		Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
 		Hide();
 	}
 
@@ -61,10 +72,9 @@ public partial class FloatingTooltip : Window {
 		// Enqueued fires before RatScannerMain raises PropertyChanged, so the bindings still
 		// hold the previous item. Re-setting the DataContext re-evaluates them now, before
 		// the window is measured and shown; otherwise the old item flashed first.
-		var vm = (MenuVM)DataContext;
 		DataContext = null;
-		DataContext = vm;
-		var item = vm.LastItem;
+		DataContext = _vm;
+		var item = _vm.LastItem;
 
 		// Set here rather than by a style trigger: the local value from UpdateElements would override a trigger
 		TraderPriceDisplay.Visibility = RcFloatingTooltip.ShowTraderPrice && item.GetBestSellToTraderOffer() != null
