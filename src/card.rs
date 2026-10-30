@@ -6,16 +6,20 @@ use crate::progress::Progress;
 use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
 use tiny_skia::{Color, Paint, Pixmap, PremultipliedColorU8, Rect, Transform};
 
-const WIDTH: f32 = 360.0;
-const PAD: f32 = 10.0;
+const WIDTH: f32 = 380.0;
+const PAD: f32 = 12.0;
 const BORDER: f32 = 2.0;
-const GAP: f32 = 4.0;
+const GAP: f32 = 5.0;
 const TITLE: f32 = 26.0;
-const VALUE: f32 = 22.0;
-const DETAIL: f32 = 17.0;
+const HEADLINE: f32 = 20.0;
+const ROW: f32 = 18.0;
+const LABEL: f32 = 12.0;
+const SMALL: f32 = 14.0;
+const FOOT: f32 = 16.0;
 
 pub const TEXT: Rgb = Rgb(0xF2, 0xF2, 0xF2);
 pub const SECONDARY: Rgb = Rgb(0xB8, 0xB8, 0xB8);
+pub const MUTED: Rgb = Rgb(0x8C, 0x8C, 0x8C);
 pub const AMBER: Rgb = Rgb(0xFF, 0xB0, 0x20);
 pub const PURPLE: Rgb = Rgb(0xC0, 0x80, 0xFF);
 /// Needed, but nothing can be done with it yet.
@@ -23,15 +27,31 @@ pub const LATER: Rgb = Rgb(0xC8, 0x90, 0x40);
 pub const GREEN: Rgb = Rgb(0x40, 0xD0, 0x60);
 pub const GREY: Rgb = Rgb(0x80, 0x80, 0x80);
 pub const RED: Rgb = Rgb(0xFF, 0x50, 0x50);
+const RULE: Rgb = Rgb(0x3A, 0x3A, 0x3A);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Style {
+    Plain,
+    /// Tinted band behind the line (the verdict).
+    Band,
+    /// Small uppercase group heading.
+    Label,
+    /// Thin separator; text is ignored.
+    Rule,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Line {
     pub text: String,
     pub size: f32,
     pub color: Rgb,
+    pub bold: bool,
+    pub style: Style,
+    /// Right-aligned text on the same line.
+    pub right: Option<(String, Rgb)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,7 +61,25 @@ pub struct Card {
 }
 
 fn line(text: impl Into<String>, size: f32, color: Rgb) -> Line {
-    Line { text: text.into(), size, color }
+    Line { text: text.into(), size, color, bold: true, style: Style::Plain, right: None }
+}
+
+impl Line {
+    fn right(mut self, text: impl Into<String>, color: Rgb) -> Line {
+        let t = text.into();
+        if !t.is_empty() {
+            self.right = Some((t, color));
+        }
+        self
+    }
+    fn style(mut self, style: Style) -> Line {
+        self.style = style;
+        self
+    }
+    fn regular(mut self) -> Line {
+        self.bold = false;
+        self
+    }
 }
 
 /// Thousands separated by a thin space.
@@ -62,9 +100,9 @@ pub fn rub(n: i64) -> String {
 
 /// Title + body lines, for toasts and rejected scans.
 pub fn message(title: &str, body: &str, border: Rgb) -> Card {
-    let mut lines = vec![line(title, VALUE, TEXT)];
+    let mut lines = vec![line(title, HEADLINE, TEXT)];
     if !body.is_empty() {
-        lines.push(line(body, DETAIL, SECONDARY));
+        lines.push(line(body, SMALL, SECONDARY).regular());
     }
     Card { border, lines }
 }
@@ -99,41 +137,19 @@ impl CardOptions {
 
 /// One need row with its ordering keys.
 struct Row {
-    /// Outside the goal: always last.
-    off_goal: bool,
-    /// Smart groups: active task, available task, buildable hideout, other tasks, other hideout.
+    /// Index into the group headings.
+    group: usize,
+    /// Smart: buildable hideout before the rest.
     rank: u8,
-    hideout: bool,
     count: u32,
     /// Share of the requirement's other parts already done (1.0 = this item is the last piece).
     done: f32,
     levels_to_go: u32,
     unlocks: u32,
     name: String,
-    /// Reason shown in smart mode.
     tag: String,
+    tag_color: Rgb,
     color: Rgb,
-}
-
-impl Row {
-    fn text(&self, smart: bool) -> String {
-        if smart { format!("{}{}", self.name, self.tag) } else { self.name.clone() }
-    }
-}
-
-fn sort_rows(rows: &mut [Row], smart: bool) {
-    if smart {
-        rows.sort_by(|a, b| {
-            a.off_goal
-                .cmp(&b.off_goal)
-                .then(a.rank.cmp(&b.rank))
-                .then(b.done.total_cmp(&a.done))
-                .then(a.levels_to_go.cmp(&b.levels_to_go))
-                .then(b.unlocks.cmp(&a.unlocks))
-        });
-    } else {
-        rows.sort_by(|a, b| a.off_goal.cmp(&b.off_goal).then(a.hideout.cmp(&b.hideout)).then(b.count.cmp(&a.count)));
-    }
 }
 
 fn in_goal(t: &needs::TaskNeed, goal: Goal) -> bool {
@@ -142,6 +158,10 @@ fn in_goal(t: &needs::TaskNeed, goal: Goal) -> bool {
         Goal::Kappa => t.kappa,
         Goal::Lightkeeper => t.lightkeeper,
     }
+}
+
+fn tags(parts: &[(bool, &str)]) -> String {
+    parts.iter().filter(|(on, _)| *on).map(|(_, t)| *t).collect::<Vec<_>>().join(" · ")
 }
 
 pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardOptions) -> Card {
@@ -159,104 +179,142 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardO
     let keep_later: u32 = goal_tasks().map(|t| t.count).sum::<u32>() + hideout_total;
     let (barters, crafts) = needs::recipes_using(cat, &item.id);
     let best = item.best_trader();
+    let slots = (item.width * item.height).max(1);
 
-    let title = if score < 0.7 { format!("{} ?", item.short_name) } else { item.short_name.clone() };
-    let (verdict, color) = if current > 0 {
-        let fir = if current_fir { " (FIR)" } else { "" };
-        (format!("KEEP – QUEST {current}×{fir}"), AMBER)
+    let (verdict, why, color) = if current > 0 {
+        let fir = if current_fir { "  FIR" } else { "" };
+        (format!("KEEP {current}×{fir}"), "for a task you have now".to_owned(), AMBER)
     } else if buildable > 0 {
-        (format!("KEEP – HIDEOUT {buildable}×"), AMBER)
+        (format!("KEEP {buildable}×"), "for a buildable upgrade".to_owned(), AMBER)
     } else if o.goal == Goal::None && kappa > 0 {
-        (format!("KEEP – KAPPA {kappa}×"), PURPLE)
+        (format!("KEEP {kappa}×"), "for Kappa".to_owned(), PURPLE)
     } else if keep_later > 0 {
-        (format!("KEEP – LATER {keep_later}×"), LATER)
+        (format!("KEEP {keep_later}×"), "for later".to_owned(), LATER)
     } else if total > 0 {
-        (format!("NOT FOR {} – {total}×", o.goal.label().to_uppercase()), GREY)
+        ("NOT NEEDED".to_owned(), format!("{total}× outside {}", o.goal.label()), GREY)
     } else {
         // Items without a flea price are judged by their best trader offer.
-        let slots = (item.width * item.height).max(1);
         let per_slot = item.price_per_slot().or(best.map(|b| b.price_rub / slots)).unwrap_or(0);
+        let why = if per_slot > 0 { format!("{} ₽/slot", rub(per_slot)) } else { String::new() };
         if per_slot >= 30_000 {
-            ("VALUABLE".into(), GREEN)
+            ("VALUABLE".into(), why, GREEN)
         } else if per_slot >= 10_000 {
-            ("OK".into(), TEXT)
+            ("OK".into(), why, TEXT)
         } else {
-            ("LOW".into(), GREY)
+            ("LOW".into(), why, GREY)
         }
     };
 
-    let mut lines = vec![line(title, TITLE, TEXT), line(verdict, VALUE, color)];
-    if total > 0 {
-        let parts: Vec<String> = [(o.quests, quest_total, "quests"), (o.hideout, hideout_total, "hideout")]
-            .iter()
-            .filter(|(on, n, _)| *on && *n > 0)
-            .map(|(_, n, what)| format!("{what} {n}"))
-            .collect();
-        lines.push(line(format!("Total {total}×  ({})", parts.join(" · ")), VALUE, TEXT));
-    }
-    if let (Some(avg), Some(per)) = (item.avg24h, item.price_per_slot()) {
-        lines.push(line(format!("Flea {} ₽  ·  {} ₽/slot", rub(avg), rub(per)), VALUE, TEXT));
-    }
-    if let Some(b) = best {
-        let name = cat.traders.get(&b.trader).cloned().unwrap_or_else(|| b.trader.clone());
-        lines.push(line(format!("{name} {} ₽", rub(b.price_rub)), VALUE, TEXT));
-    }
+    let title = if score < 0.7 { format!("{} ?", item.short_name) } else { item.short_name.clone() };
+    let needed = if total > 0 { format!("{total}× needed") } else { String::new() };
+    let mut lines = vec![
+        line(title, TITLE, TEXT).right(needed, MUTED),
+        line(verdict, HEADLINE, color).style(Style::Band).right(why, color),
+    ];
 
-    let last = |d: Option<f32>| if d == Some(1.0) { " · last item" } else { "" };
+    // Groups: smart = NOW / HIDEOUT / LATER, plain = QUESTS / HIDEOUT; quests outside the goal last.
+    let other = format!("NOT {}", o.goal.label().to_uppercase());
+    let groups: [&str; 4] = if o.smart { ["NOW", "HIDEOUT", "LATER", &other] } else { ["QUESTS", "HIDEOUT", "", &other] };
     let mut rows: Vec<Row> = q
         .tasks
         .iter()
         .map(|t| {
             let levels_to_go = p.level.map_or(0, |l| t.min_level.saturating_sub(u32::from(l)));
-            let lvl = if levels_to_go > 0 { format!(" (Lv{})", t.min_level) } else { String::new() };
+            let goal = in_goal(t, o.goal);
+            let group = if !goal {
+                3
+            } else if !o.smart || t.is_current() {
+                0
+            } else {
+                2
+            };
+            let lvl = format!("Lv {}", t.min_level);
             Row {
-                off_goal: !in_goal(t, o.goal),
-                rank: match t.gate {
-                    needs::Gate::Active => 0,
-                    needs::Gate::Available => 1,
-                    _ => 3,
-                },
-                hideout: false,
+                group,
+                rank: 0,
                 count: t.count,
                 done: t.other_done.unwrap_or(0.0),
                 levels_to_go,
                 unlocks: t.unlocks,
-                name: format!("{}× {}", t.count, t.name),
-                tag: format!("{lvl}{}", last(t.other_done)),
-                color: if t.is_current() && in_goal(t, o.goal) { TEXT } else { SECONDARY },
+                name: format!("{}×  {}", t.count, t.name),
+                tag: tags(&[
+                    (t.fir > 0, "FIR"),
+                    (o.smart && levels_to_go > 0, &lvl),
+                    (o.smart && t.other_done == Some(1.0), "last item"),
+                ]),
+                tag_color: if t.fir > 0 { AMBER } else { SECONDARY },
+                color: if !goal {
+                    MUTED
+                } else if t.is_current() {
+                    TEXT
+                } else {
+                    SECONDARY
+                },
             }
         })
         .chain(hideout.iter().map(|h| Row {
-            off_goal: false,
-            rank: if h.buildable { 2 } else { 4 },
-            hideout: true,
+            group: 1,
+            rank: if o.smart && h.buildable { 0 } else { 1 },
             count: h.remaining,
             done: h.other_done.unwrap_or(0.0),
             levels_to_go: h.distance,
             unlocks: h.unlocks,
-            name: format!("{}× {} Lv{}", h.remaining, h.station, h.level),
-            tag: last(h.other_done).to_owned(),
+            name: format!("{}×  {} {}", h.remaining, h.station, h.level),
+            tag: tags(&[(o.smart && h.buildable, "buildable"), (o.smart && h.other_done == Some(1.0), "last item")]),
+            tag_color: GREEN,
             color: if h.buildable { TEXT } else { SECONDARY },
         }))
         .collect();
-    sort_rows(&mut rows, o.smart);
+    if o.smart {
+        rows.sort_by(|a, b| {
+            a.group
+                .cmp(&b.group)
+                .then(a.rank.cmp(&b.rank))
+                .then(b.done.total_cmp(&a.done))
+                .then(a.levels_to_go.cmp(&b.levels_to_go))
+                .then(b.unlocks.cmp(&a.unlocks))
+        });
+    } else {
+        rows.sort_by(|a, b| a.group.cmp(&b.group).then(b.count.cmp(&a.count)));
+    }
     let shown = o.max_rows as usize;
+    let mut last_group = None;
     for r in rows.iter().take(shown) {
-        lines.push(line(r.text(o.smart), DETAIL, r.color));
+        if last_group != Some(r.group) {
+            lines.push(line(groups[r.group], LABEL, MUTED).style(Style::Label));
+            last_group = Some(r.group);
+        }
+        lines.push(line(r.name.clone(), ROW, r.color).right(r.tag.clone(), r.tag_color));
     }
     if let Some(l) = more(rows.iter().skip(shown).map(|r| r.count)) {
         lines.push(l);
     }
 
+    let flea = item.avg24h.map(|avg| {
+        let per = if slots > 1 { format!("  ·  {} ₽/slot", rub(avg / slots)) } else { String::new() };
+        format!("Flea {} ₽{per}", rub(avg))
+    });
+    let trader = best.map(|b| {
+        let name = cat.traders.get(&b.trader).cloned().unwrap_or_else(|| b.trader.clone());
+        format!("{name} {} ₽", rub(b.price_rub))
+    });
     let mut recipes = Vec::new();
     if o.barters && barters > 0 {
-        recipes.push(format!("Barters: {barters}"));
+        recipes.push(format!("Barters {barters}"));
     }
     if o.crafts && crafts > 0 {
-        recipes.push(format!("Crafts: {crafts}"));
+        recipes.push(format!("Crafts {crafts}"));
+    }
+    if flea.is_some() || trader.is_some() || !recipes.is_empty() {
+        lines.push(line("", 1.0, RULE).style(Style::Rule));
+    }
+    match (flea, trader) {
+        (Some(f), t) => lines.push(line(f, FOOT, TEXT).regular().right(t.unwrap_or_default(), TEXT)),
+        (None, Some(t)) => lines.push(line(t, FOOT, TEXT).regular()),
+        (None, None) => {}
     }
     if !recipes.is_empty() {
-        lines.push(line(recipes.join(" · "), DETAIL, SECONDARY));
+        lines.push(line(recipes.join(" · "), SMALL, MUTED).regular());
     }
     Card { border: color, lines }
 }
@@ -264,7 +322,7 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardO
 /// `+n× in k more` for rows that did not fit, so the rows add up to the total.
 fn more(rest: impl Iterator<Item = u32>) -> Option<Line> {
     let (n, k) = rest.fold((0, 0), |(n, k), c| (n + c, k + 1));
-    (k > 0).then(|| line(format!("+{n}× in {k} more"), DETAIL, SECONDARY))
+    (k > 0).then(|| line(format!("+{n}× in {k} more"), SMALL, MUTED).regular())
 }
 
 /// Replaces characters the font lacks with ASCII stand-ins.
@@ -354,21 +412,56 @@ fn draw_text(pix: &mut Pixmap, font: &FontArc, size: f32, s: &str, x: f32, basel
     }
 }
 
+/// Bold for headings and rows, regular for prices and small print.
+#[derive(Clone)]
+pub struct Fonts {
+    pub bold: FontArc,
+    pub regular: FontArc,
+}
+
 /// Full card at `scale`: fixed width, height from the lines. Premultiplied RGBA.
-pub fn render(card: &Card, font: &FontArc, scale: f32) -> Pixmap {
+pub fn render(card: &Card, fonts: &Fonts, scale: f32) -> Pixmap {
     let s = scale.clamp(0.75, 2.0);
     let width = (WIDTH * s).round();
-    let inner = width - 2.0 * (PAD + BORDER) * s;
-    let lines: Vec<(String, f32, Rgb)> = card
-        .lines
-        .iter()
-        .map(|l| {
-            let size = l.size * s;
-            (fit(font, size, displayable(font, &l.text), inner), size, l.color)
-        })
-        .collect();
-    let heights: Vec<f32> = lines.iter().map(|(_, size, _)| font.as_scaled(PxScale::from(*size)).height()).collect();
-    let height = (2.0 * (PAD + BORDER) * s + heights.iter().sum::<f32>() + GAP * s * (lines.len().saturating_sub(1)) as f32).ceil();
+    let left = (PAD + BORDER) * s;
+    let inner = width - 2.0 * left;
+    let band_pad = 5.0 * s;
+
+    struct Laid {
+        text: String,
+        right: Option<(String, Rgb, f32)>,
+        size: f32,
+        font: FontArc,
+        color: Rgb,
+        style: Style,
+        top: f32,
+        height: f32,
+    }
+    let mut laid = Vec::new();
+    let mut y = left;
+    for l in &card.lines {
+        let font = if l.bold { fonts.bold.clone() } else { fonts.regular.clone() };
+        let size = l.size * s;
+        let (top_extra, height) = match l.style {
+            Style::Rule => (2.0 * s, 1.0 * s + 4.0 * s),
+            Style::Label => (4.0 * s, font.as_scaled(PxScale::from(size)).height()),
+            Style::Band => (2.0 * s, font.as_scaled(PxScale::from(size)).height() + 2.0 * band_pad),
+            Style::Plain => (0.0, font.as_scaled(PxScale::from(size)).height()),
+        };
+        // Right text is drawn in regular weight at most at the line's size.
+        let right = l.right.as_ref().map(|(t, c)| {
+            let rsize = size.min(SMALL * s + 2.0 * s);
+            let t = displayable(&fonts.regular, t);
+            let w = text_width(&fonts.regular, rsize, &t);
+            (t, *c, rsize, w)
+        });
+        let avail = inner - right.as_ref().map_or(0.0, |r| r.3 + 12.0 * s) - if l.style == Style::Band { 2.0 * band_pad } else { 0.0 };
+        let text = if l.style == Style::Rule { String::new() } else { fit(&font, size, displayable(&font, &l.text), avail) };
+        y += top_extra;
+        laid.push(Laid { text, right: right.map(|(t, c, rs, _)| (t, c, rs)), size, font, color: l.color, style: l.style, top: y, height });
+        y += height + GAP * s;
+    }
+    let height = (y - GAP * s + left).ceil();
 
     let mut pix = Pixmap::new(width as u32, height.max(1.0) as u32).expect("card size");
     let mut paint = Paint::default();
@@ -378,13 +471,31 @@ pub fn render(card: &Card, font: &FontArc, scale: f32) -> Pixmap {
     paint.set_color(Color::from_rgba8(0x10, 0x10, 0x10, 235));
     let b = BORDER * s;
     // Clear the inside first so the background alpha is not composited over the border colour.
-    pix.fill_rect(Rect::from_xywh(b, b, width - 2.0 * b, height - 2.0 * b).unwrap(), &Paint { blend_mode: tiny_skia::BlendMode::Source, ..paint }, Transform::identity(), None);
+    pix.fill_rect(Rect::from_xywh(b, b, width - 2.0 * b, height - 2.0 * b).unwrap(), &Paint { blend_mode: tiny_skia::BlendMode::Source, ..paint.clone() }, Transform::identity(), None);
 
-    let mut y = (PAD + BORDER) * s;
-    for ((text, size, color), h) in lines.iter().zip(&heights) {
-        let ascent = font.as_scaled(PxScale::from(*size)).ascent();
-        draw_text(&mut pix, font, *size, text, (PAD + BORDER) * s, y + ascent, *color);
-        y += h + GAP * s;
+    for l in &laid {
+        match l.style {
+            Style::Rule => {
+                paint.set_color(Color::from_rgba8(RULE.0, RULE.1, RULE.2, 255));
+                let r = Rect::from_xywh(left, l.top + 2.0 * s, inner, 1.0 * s).unwrap();
+                pix.fill_rect(r, &paint, Transform::identity(), None);
+                continue;
+            }
+            Style::Band => {
+                paint.set_color(Color::from_rgba8(l.color.0, l.color.1, l.color.2, 46));
+                let r = Rect::from_xywh(left - 4.0 * s, l.top, inner + 8.0 * s, l.height).unwrap();
+                pix.fill_rect(r, &paint, Transform::identity(), None);
+            }
+            Style::Label | Style::Plain => {}
+        }
+        let pad = if l.style == Style::Band { band_pad } else { 0.0 };
+        let ascent = l.font.as_scaled(PxScale::from(l.size)).ascent();
+        let baseline = l.top + pad + ascent;
+        draw_text(&mut pix, &l.font, l.size, &l.text, left + pad, baseline, l.color);
+        if let Some((t, c, rs)) = &l.right {
+            let w = text_width(&fonts.regular, *rs, t);
+            draw_text(&mut pix, &fonts.regular, *rs, t, left + inner - pad - w, baseline, *c);
+        }
     }
     pix
 }
@@ -401,61 +512,37 @@ mod tests {
     }
 
     const OPTS: CardOptions =
-        CardOptions { show_non_fir: true, max_rows: 1, quests: true, hideout: true, barters: true, crafts: true, smart: true, goal: Goal::None };
+        CardOptions { show_non_fir: true, max_rows: 10, quests: true, hideout: true, barters: true, crafts: true, smart: true, goal: Goal::None };
 
-    #[test]
-    fn verdict_precedence_quest_over_price() {
-        let mut cat = Catalog::default();
-        let item = Item { id: "i".into(), short_name: "PS".into(), width: 1, height: 1, avg24h: Some(50_000), ..Default::default() };
-        cat.items.insert("i".into(), item.clone());
-        assert_eq!(item_card(&cat, &item, 0.9, &Progress::default(), &OPTS).lines[1].text, "VALUABLE");
-        let o = crate::data::Objective { id: "o".into(), kind: "giveItem".into(), count: 2, found_in_raid: true, items: vec!["i".into()], ..Default::default() };
-        cat.tasks.insert("t".into(), crate::data::Task { id: "t".into(), name: "Task".into(), objectives: vec![o], ..Default::default() });
-        let card = item_card(&cat, &item, 0.6, &Progress::default(), &OPTS);
-        assert_eq!(card.lines[0].text, "PS ?");
-        assert_eq!(card.lines[1].text, "KEEP – QUEST 2× (FIR)");
-        assert_eq!(card.border, AMBER);
-    }
-
-    #[test]
-    fn rows_by_priority_total_follows_marked_counts_and_toggles() {
-        use crate::data::{HideoutRequirement, Objective, Station, StationLevel, Task};
-        let mut cat = Catalog::default();
-        let item = Item { id: "i".into(), short_name: "Shus".into(), width: 1, height: 1, ..Default::default() };
-        let o = Objective { id: "o".into(), kind: "giveItem".into(), count: 2, items: vec!["i".into()], ..Default::default() };
-        cat.tasks.insert("t".into(), Task { id: "t".into(), name: "Task".into(), objectives: vec![o], ..Default::default() });
-        let req = |id: &str, count| HideoutRequirement { id: id.into(), item: "i".into(), count, fir: false };
-        cat.stations.push(Station {
-            id: "s".into(),
-            name: "Stash".into(),
-            levels: vec![
-                StationLevel { id: "s-1".into(), level: 1, item_requirements: vec![req("r1", 3)], ..Default::default() },
-                StationLevel { id: "s-2".into(), level: 2, item_requirements: vec![req("r2", 5)], ..Default::default() },
-            ],
-        });
-        let opts = CardOptions { max_rows: 2, ..OPTS };
-        let text = |p: &Progress, o: &CardOptions| -> Vec<String> {
-            item_card(&cat, &item, 0.9, p, o).lines.into_iter().map(|l| l.text).collect()
-        };
-        let mut p = Progress::default();
-        assert_eq!(text(&p, &opts)[2..], ["Total 10×  (quests 2 · hideout 8)", "2× Task", "3× Stash Lv1", "+5× in 1 more"]);
-        // One Shus marked on TarkovTracker's needed-items page = hideout part count 1.
-        p.hideout_parts.insert("r1".into(), crate::progress::PartProgress { complete: false, count: 1 });
-        assert_eq!(text(&p, &opts)[2], "Total 9×  (quests 2 · hideout 7)");
-        let no_hideout = CardOptions { hideout: false, ..opts };
-        assert_eq!(text(&p, &no_hideout)[2..], ["Total 2×  (quests 2)", "2× Task"]);
+    /// Lines as `text | right`; separators omitted.
+    fn show(c: &Card) -> Vec<String> {
+        c.lines
+            .iter()
+            .filter(|l| l.style != Style::Rule)
+            .map(|l| match &l.right {
+                Some((r, _)) => format!("{} | {r}", l.text),
+                None => l.text.clone(),
+            })
+            .collect()
     }
 
     fn ordering_catalog() -> (Catalog, Item) {
         use crate::data::{HideoutRequirement, Objective, Station, StationLevel, Task};
         let mut cat = Catalog::default();
         let item = Item { id: "i".into(), short_name: "Shus".into(), width: 1, height: 1, ..Default::default() };
-        let give = |id: &str, n| Objective { id: id.into(), kind: "giveItem".into(), count: n, items: vec!["i".into()], ..Default::default() };
-        let mut kappa = Task { id: "k".into(), name: "Kappa task".into(), objectives: vec![give("ok", 1)], ..Default::default() };
+        let give = |id: &str, n, fir| Objective {
+            id: id.into(),
+            kind: "giveItem".into(),
+            count: n,
+            found_in_raid: fir,
+            items: vec!["i".into()],
+            ..Default::default()
+        };
+        let mut kappa = Task { id: "k".into(), name: "Kappa task".into(), objectives: vec![give("ok", 1, false)], ..Default::default() };
         kappa.kappa_required = true;
         kappa.min_player_level = 30;
         cat.tasks.insert("k".into(), kappa);
-        cat.tasks.insert("s".into(), Task { id: "s".into(), name: "Side task".into(), objectives: vec![give("os", 4)], ..Default::default() });
+        cat.tasks.insert("s".into(), Task { id: "s".into(), name: "Side task".into(), objectives: vec![give("os", 4, true)], ..Default::default() });
         let req = |id: &str, item: &str, count| HideoutRequirement { id: id.into(), item: item.into(), count, fir: false };
         let lvl = |id: &str, level, reqs| StationLevel { id: id.into(), level, item_requirements: reqs, ..Default::default() };
         cat.stations.push(Station {
@@ -466,38 +553,74 @@ mod tests {
         cat.stations.push(Station {
             id: "b".into(),
             name: "Rack".into(),
-            levels: vec![lvl("b-1", 1, vec![]), lvl("b-2", 2, vec![req("b2", "i", 5), req("b2x", "x", 5)])],
+            levels: vec![lvl("b-1", 1, vec![req("b1", "i", 2)]), lvl("b-2", 2, vec![req("b2", "i", 5), req("b2x", "x", 5)])],
         });
         (cat, item)
     }
 
-    fn rows(cat: &Catalog, item: &Item, p: &Progress, o: &CardOptions) -> Vec<String> {
-        item_card(cat, item, 0.9, p, o).lines.into_iter().skip(3).map(|l| l.text).collect()
+    #[test]
+    fn price_verdict_without_needs() {
+        let cat = Catalog::default();
+        let item = Item { id: "i".into(), short_name: "PS".into(), width: 1, height: 1, avg24h: Some(50_000), ..Default::default() };
+        let c = item_card(&cat, &item, 0.6, &Progress::default(), &OPTS);
+        assert_eq!(show(&c)[..2], ["PS ?", "VALUABLE | 50\u{2009}000 ₽/slot"]);
+        assert_eq!(c.border, GREEN);
     }
 
     #[test]
-    fn smart_puts_last_missing_piece_first_and_tags_reasons() {
+    fn smart_groups_now_hideout_later_with_reason_tags() {
         let (cat, item) = ordering_catalog();
         let mut p = Progress { level: Some(16), ..Default::default() };
-        // Nothing built → level 2 of each station is not buildable; Rack 2 has its other part handed in.
+        // Rack 2's other part is handed in → Shus is its last missing piece.
         p.hideout_parts.insert("b2x".into(), crate::progress::PartProgress { complete: true, count: 5 });
-        let o = CardOptions { max_rows: 10, ..OPTS };
+        let c = item_card(&cat, &item, 0.9, &p, &OPTS);
         assert_eq!(
-            rows(&cat, &item, &p, &o),
-            ["4× Side task", "1× Kappa task (Lv30)", "5× Rack Lv2 · last item", "8× Stash Lv2"]
+            show(&c),
+            [
+                "Shus | 20× needed",
+                "KEEP 4×  FIR | for a task you have now",
+                "NOW",
+                "4×  Side task | FIR",
+                "HIDEOUT",
+                "2×  Rack 1 | buildable",
+                "5×  Rack 2 | last item",
+                "8×  Stash 2",
+                "LATER",
+                "1×  Kappa task | Lv 30",
+            ]
         );
-        // Off: quests then hideout, biggest count first, no tags.
-        let plain = CardOptions { smart: false, ..o };
-        assert_eq!(rows(&cat, &item, &p, &plain), ["4× Side task", "1× Kappa task", "8× Stash Lv2", "5× Rack Lv2"]);
+        assert_eq!(c.border, AMBER);
+    }
+
+    #[test]
+    fn plain_ordering_and_row_limit_add_up() {
+        let (cat, item) = ordering_catalog();
+        let p = Progress { level: Some(16), ..Default::default() };
+        let o = CardOptions { smart: false, max_rows: 3, ..OPTS };
+        assert_eq!(
+            show(&item_card(&cat, &item, 0.9, &p, &o))[2..],
+            ["QUESTS", "4×  Side task | FIR", "1×  Kappa task", "HIDEOUT", "8×  Stash 2", "+7× in 2 more"]
+        );
+    }
+
+    #[test]
+    fn marked_counts_lower_the_total() {
+        let (cat, item) = ordering_catalog();
+        let mut p = Progress { level: Some(16), ..Default::default() };
+        p.hideout_parts.insert("a2".into(), crate::progress::PartProgress { complete: false, count: 1 });
+        assert_eq!(show(&item_card(&cat, &item, 0.9, &p, &OPTS))[0], "Shus | 19× needed");
+        let no_hideout = CardOptions { hideout: false, ..OPTS };
+        assert_eq!(show(&item_card(&cat, &item, 0.9, &p, &no_hideout))[0], "Shus | 5× needed");
     }
 
     #[test]
     fn goal_drops_other_quests_from_keep_and_sinks_them() {
         let (cat, item) = ordering_catalog();
         let p = Progress { level: Some(40), ..Default::default() };
-        let o = CardOptions { max_rows: 10, goal: Goal::Kappa, hideout: false, ..OPTS };
-        let card = item_card(&cat, &item, 0.9, &p, &o);
-        assert_eq!(card.lines[1].text, "KEEP – QUEST 1×");
-        assert_eq!(rows(&cat, &item, &p, &o), ["1× Kappa task", "4× Side task"]);
+        let o = CardOptions { goal: Goal::Kappa, hideout: false, ..OPTS };
+        assert_eq!(
+            show(&item_card(&cat, &item, 0.9, &p, &o))[1..],
+            ["KEEP 1× | for a task you have now", "NOW", "1×  Kappa task", "NOT KAPPA", "4×  Side task | FIR"]
+        );
     }
 }

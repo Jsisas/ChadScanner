@@ -33,14 +33,15 @@ fn main() {
 }
 
 #[cfg(windows)]
-fn load_font() -> anyhow::Result<ab_glyph::FontArc> {
-    for name in ["segoeuib.ttf", "arialbd.ttf"] {
-        let path = std::path::Path::new(r"C:\Windows\Fonts").join(name);
-        if let Ok(bytes) = std::fs::read(&path) {
-            return Ok(ab_glyph::FontArc::try_from_vec(bytes)?);
-        }
-    }
-    anyhow::bail!(r"neither C:\Windows\Fonts\segoeuib.ttf nor arialbd.ttf found")
+fn load_fonts() -> anyhow::Result<card::Fonts> {
+    let load = |names: &[&str]| {
+        names.iter().find_map(|n| std::fs::read(std::path::Path::new(r"C:\Windows\Fonts").join(n)).ok()).map(ab_glyph::FontArc::try_from_vec)
+    };
+    let bold = load(&["segoeuib.ttf", "arialbd.ttf"])
+        .ok_or_else(|| anyhow::anyhow!(r"neither C:\Windows\Fonts\segoeuib.ttf nor arialbd.ttf found"))??;
+    // Regular weight is optional; bold stands in.
+    let regular = load(&["segoeui.ttf", "arial.ttf"]).and_then(Result::ok).unwrap_or_else(|| bold.clone());
+    Ok(card::Fonts { bold, regular })
 }
 
 #[cfg(windows)]
@@ -64,7 +65,7 @@ fn run() -> anyhow::Result<()> {
     }
     log::info!("ChadOverlay {} starting; data {}", env!("CARGO_PKG_VERSION"), paths.data.display());
 
-    let font = load_font()?;
+    let font = load_fonts()?;
     let cfg = config::Config::load(&paths.config());
     let (ui, ui_rx) = win::ui::Ui::new();
     let app = app::App::new(paths.clone(), cfg.clone(), ui.clone(), font);

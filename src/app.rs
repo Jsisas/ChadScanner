@@ -5,7 +5,6 @@ use crate::data::Store;
 use crate::eftlog::{self, Event, LogState, Tailer};
 use crate::progress::{LocalSource, Notify, ProgressSource, TaskState, TrackerSource};
 use crate::win::{self, hook::ScanRequest, ui};
-use ab_glyph::FontArc;
 use chadvision::engine::Engine;
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,7 +27,7 @@ pub struct App {
     local: RwLock<Option<Arc<LocalSource>>>,
     pub engine: OnceLock<Engine>,
     ui: ui::Ui,
-    font: FontArc,
+    font: card::Fonts,
     paused: AtomicBool,
     settings: Mutex<Option<Child>>,
     /// Serialises mode switches.
@@ -36,7 +35,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(paths: Paths, cfg: Config, ui: ui::Ui, font: FontArc) -> Arc<App> {
+    pub fn new(paths: Paths, cfg: Config, ui: ui::Ui, font: card::Fonts) -> Arc<App> {
         let mode = cfg.mode;
         let app = Arc::new_cyclic(|weak: &std::sync::Weak<App>| {
             let w = weak.clone();
