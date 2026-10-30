@@ -3,13 +3,13 @@
 # Rerun-safe: overwrites the exe, the ONNX Runtime DLL and data/ in the output folder.
 #
 # Usage: tools/deploy-wsl.sh [--out DIR] [--chadvision DIR]
-#   --out         publish folder (default /mnt/c/ChadOverlay, i.e. C:\ChadOverlay)
+#   --out         publish folder (default /mnt/c/ChadScanner, i.e. C:\ChadScanner)
 #   --chadvision  ChadVision repo (default ../ChadVision next to this repo)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CV="$ROOT/../ChadVision"
-OUT="/mnt/c/ChadOverlay"
+OUT="/mnt/c/ChadScanner"
 TARGET=x86_64-pc-windows-msvc
 # Windows build loads ONNX Runtime dynamically; the version must match ort-sys (1.22.x).
 ORT_VER=1.22.0

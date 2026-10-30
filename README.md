@@ -15,7 +15,7 @@ shows the price, and whether to keep the item for quests, hideout or Kappa.
 ## Build and deploy (WSL / Linux)
 
 ```
-tools/deploy-wsl.sh            # → C:\ChadOverlay
+tools/deploy-wsl.sh            # → C:\ChadScanner
 tools/deploy-wsl.sh --out DIR
 ```
 
@@ -23,7 +23,7 @@ Needs rustup, `lld` (`lld-link`), curl and unzip; installs the Windows target an
 
 ## Running
 
-- Run `C:\ChadOverlay\chadoverlay.exe`. It starts in the tray; the tray menu has Settings, Pause scanning
+- Run `C:\ChadScanner\chadoverlay.exe`. It starts in the tray; the tray menu has Settings, Pause scanning
   and Quit.
 - **EFT must run in borderless (windowed fullscreen) mode.** Exclusive fullscreen is not supported: the
   tooltip is a normal topmost window and is not drawn over an exclusive-fullscreen game.
