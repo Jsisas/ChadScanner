@@ -424,7 +424,6 @@ pub fn render(card: &Card, fonts: &Fonts, scale: f32) -> Pixmap {
         color: Rgb,
         style: Style,
         top: f32,
-        height: f32,
     }
     let mut laid = Vec::new();
     let mut y = left;
@@ -446,7 +445,7 @@ pub fn render(card: &Card, fonts: &Fonts, scale: f32) -> Pixmap {
         let avail = inner - right.as_ref().map_or(0.0, |r| r.3 + 12.0 * s);
         let text = if l.style == Style::Rule { String::new() } else { fit(&font, size, displayable(&font, &l.text), avail) };
         y += top_extra;
-        laid.push(Laid { text, right: right.map(|(t, c, rs, _)| (t, c, rs)), size, font, color: l.color, style: l.style, top: y, height });
+        laid.push(Laid { text, right: right.map(|(t, c, rs, _)| (t, c, rs)), size, font, color: l.color, style: l.style, top: y });
         y += height + GAP * s;
     }
     let height = (y - GAP * s + left).ceil();
