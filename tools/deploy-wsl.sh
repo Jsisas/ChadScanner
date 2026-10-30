@@ -64,7 +64,8 @@ EXE="$ROOT/target/$TARGET/release/chadoverlay.exe"
 
 step "Publishing to $OUT"
 TASKLIST="$(command -v tasklist.exe || echo /mnt/c/Windows/System32/tasklist.exe)"
-if [[ -x "$TASKLIST" ]] && "$TASKLIST" 2>/dev/null | grep -qi '^chadoverlay.exe'; then
+# Capture first: with pipefail, `grep -q` closing the pipe early would make the check fail silently.
+if [[ -x "$TASKLIST" ]] && grep -qi '^chadoverlay.exe' <<<"$("$TASKLIST" 2>/dev/null)"; then
 	die "chadoverlay.exe is running on Windows; quit it from the tray first (files would be locked)"
 fi
 mkdir -p "$OUT"
