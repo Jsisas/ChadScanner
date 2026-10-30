@@ -105,6 +105,12 @@ pub struct Config {
     pub close_on_leave: bool,
     pub ui_scale: f32,
     pub show_non_fir: bool,
+    /// Quest/hideout rows on the card before the "+n× more" line.
+    pub max_rows: u32,
+    pub show_quests: bool,
+    pub show_hideout: bool,
+    pub show_barters: bool,
+    pub show_crafts: bool,
     pub log_tracking: bool,
     pub logs_override: String,
 }
@@ -120,6 +126,11 @@ impl Default for Config {
             close_on_leave: true,
             ui_scale: 1.0,
             show_non_fir: true,
+            max_rows: 5,
+            show_quests: true,
+            show_hideout: true,
+            show_barters: true,
+            show_crafts: true,
             log_tracking: true,
             logs_override: String::new(),
         }

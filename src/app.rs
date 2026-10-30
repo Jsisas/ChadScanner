@@ -198,11 +198,14 @@ impl App {
             self.show_card(&card::message("?", "no confident match", card::GREY), at, Some(REJECT_SECONDS));
             return Ok(());
         };
-        let (show_non_fir, seconds) = {
+        let (opts, seconds) = {
             let c = self.cfg.read().unwrap();
-            (c.show_non_fir, c.tooltip_seconds)
+            (card::CardOptions::from_config(&c), c.tooltip_seconds)
         };
-        let c = card::item_card(&cat, item, top, &self.progress().snapshot(), show_non_fir);
+        let src = self.progress();
+        // Picks up counts just marked on tarkovtracker.org (cheap: ETag, rate-limited).
+        src.refresh_if_stale();
+        let c = card::item_card(&cat, item, top, &src.snapshot(), &opts);
         self.show_card(&c, at, Some(seconds).filter(|s| *s > 0.0));
         Ok(())
     }

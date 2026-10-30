@@ -17,6 +17,8 @@ pub const TEXT: Rgb = Rgb(0xF2, 0xF2, 0xF2);
 pub const SECONDARY: Rgb = Rgb(0xB8, 0xB8, 0xB8);
 pub const AMBER: Rgb = Rgb(0xFF, 0xB0, 0x20);
 pub const PURPLE: Rgb = Rgb(0xC0, 0x80, 0xFF);
+/// Needed, but nothing can be done with it yet.
+pub const LATER: Rgb = Rgb(0xC8, 0x90, 0x40);
 pub const GREEN: Rgb = Rgb(0x40, 0xD0, 0x60);
 pub const GREY: Rgb = Rgb(0x80, 0x80, 0x80);
 pub const RED: Rgb = Rgb(0xFF, 0x50, 0x50);
@@ -66,12 +68,46 @@ pub fn message(title: &str, body: &str, border: Rgb) -> Card {
     Card { border, lines }
 }
 
-pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, show_non_fir: bool) -> Card {
-    let q = needs::quest_needs(cat, &item.id, p, show_non_fir);
-    let mut hideout = needs::hideout_needs(cat, &item.id, p);
-    // Nearest upgrades first.
-    hideout.sort_by(|a, b| a.level.cmp(&b.level).then(b.remaining.cmp(&a.remaining)));
+/// What the card shows; from Settings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CardOptions {
+    pub show_non_fir: bool,
+    pub max_rows: u32,
+    pub quests: bool,
+    pub hideout: bool,
+    pub barters: bool,
+    pub crafts: bool,
+}
+
+impl CardOptions {
+    pub fn from_config(c: &crate::config::Config) -> CardOptions {
+        CardOptions {
+            show_non_fir: c.show_non_fir,
+            max_rows: c.max_rows,
+            quests: c.show_quests,
+            hideout: c.show_hideout,
+            barters: c.show_barters,
+            crafts: c.show_crafts,
+        }
+    }
+}
+
+/// One need row; ordered by priority: active task, available task, buildable hideout,
+/// other tasks in unlock order, other hideout levels in unlock order.
+struct Row {
+    rank: u8,
+    count: u32,
+    text: String,
+    color: Rgb,
+}
+
+pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardOptions) -> Card {
+    let q = if o.quests { needs::quest_needs(cat, &item.id, p, o.show_non_fir) } else { Default::default() };
+    let hideout = if o.hideout { needs::hideout_needs(cat, &item.id, p) } else { Vec::new() };
+    let quest_total: u32 = q.tasks.iter().map(|t| t.count).sum();
     let hideout_total: u32 = hideout.iter().map(|h| h.remaining).sum();
+    let buildable: u32 = hideout.iter().filter(|h| h.buildable).map(|h| h.remaining).sum();
+    let total = quest_total + hideout_total;
     let (barters, crafts) = needs::recipes_using(cat, &item.id);
     let best = item.best_trader();
 
@@ -79,10 +115,12 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, show_non_
     let (verdict, color) = if q.current > 0 {
         let fir = if q.current_fir > 0 { " (FIR)" } else { "" };
         (format!("KEEP – QUEST {}×{fir}", q.current), AMBER)
-    } else if hideout_total > 0 {
-        (format!("KEEP – HIDEOUT {hideout_total}×"), AMBER)
+    } else if buildable > 0 {
+        (format!("KEEP – HIDEOUT {buildable}×"), AMBER)
     } else if q.kappa > 0 {
         (format!("KEEP – KAPPA {}×", q.kappa), PURPLE)
+    } else if total > 0 {
+        (format!("KEEP – LATER {total}×"), LATER)
     } else {
         // Items without a flea price are judged by their best trader offer.
         let slots = (item.width * item.height).max(1);
@@ -97,6 +135,14 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, show_non_
     };
 
     let mut lines = vec![line(title, TITLE, TEXT), line(verdict, VALUE, color)];
+    if total > 0 {
+        let parts: Vec<String> = [(o.quests, quest_total, "quests"), (o.hideout, hideout_total, "hideout")]
+            .iter()
+            .filter(|(on, n, _)| *on && *n > 0)
+            .map(|(_, n, what)| format!("{what} {n}"))
+            .collect();
+        lines.push(line(format!("Total {total}×  ({})", parts.join(" · ")), VALUE, TEXT));
+    }
     if let (Some(avg), Some(per)) = (item.avg24h, item.price_per_slot()) {
         lines.push(line(format!("Flea {} ₽  ·  {} ₽/slot", rub(avg), rub(per)), VALUE, TEXT));
     }
@@ -104,29 +150,54 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, show_non_
         let name = cat.traders.get(&b.trader).cloned().unwrap_or_else(|| b.trader.clone());
         lines.push(line(format!("{name} {} ₽", rub(b.price_rub)), VALUE, TEXT));
     }
-    for t in q.tasks.iter().take(3) {
-        let color = if t.is_current() { TEXT } else { SECONDARY };
-        lines.push(line(format!("{}× {}", t.count, t.name), DETAIL, color));
+
+    // Both lists arrive in their own priority order; the stable sort interleaves them by rank.
+    let mut rows: Vec<Row> = q
+        .tasks
+        .iter()
+        .map(|t| Row {
+            rank: match t.gate {
+                needs::Gate::Active => 0,
+                needs::Gate::Available => 1,
+                _ => 3,
+            },
+            count: t.count,
+            text: format!("{}× {}", t.count, t.name),
+            color: if t.is_current() { TEXT } else { SECONDARY },
+        })
+        .chain(hideout.iter().map(|h| Row {
+            rank: if h.buildable { 2 } else { 4 },
+            count: h.remaining,
+            text: format!("{}× {} Lv{}", h.remaining, h.station, h.level),
+            color: if h.buildable { TEXT } else { SECONDARY },
+        }))
+        .collect();
+    rows.sort_by_key(|r| r.rank);
+    let shown = o.max_rows as usize;
+    for r in rows.iter().take(shown) {
+        lines.push(line(r.text.clone(), DETAIL, r.color));
     }
-    if let Some(l) = more(q.tasks.iter().skip(3).map(|t| t.count), "tasks") {
+    if let Some(l) = more(rows.iter().skip(shown).map(|r| r.count)) {
         lines.push(l);
     }
-    for h in hideout.iter().take(3) {
-        lines.push(line(format!("{}× {} Lv{}", h.remaining, h.station, h.level), DETAIL, TEXT));
+
+    let mut recipes = Vec::new();
+    if o.barters && barters > 0 {
+        recipes.push(format!("Barters: {barters}"));
     }
-    if let Some(l) = more(hideout.iter().skip(3).map(|h| h.remaining), "upgrades") {
-        lines.push(l);
+    if o.crafts && crafts > 0 {
+        recipes.push(format!("Crafts: {crafts}"));
     }
-    if barters + crafts > 0 {
-        lines.push(line(format!("Barters: {barters} · Crafts: {crafts}"), DETAIL, SECONDARY));
+    if !recipes.is_empty() {
+        lines.push(line(recipes.join(" · "), DETAIL, SECONDARY));
     }
     Card { border: color, lines }
 }
 
-/// `+n× in k more <what>` for list entries that did not fit, so the lines add up to the verdict total.
-fn more(rest: impl Iterator<Item = u32>, what: &str) -> Option<Line> {
+/// `+n× in k more` for rows that did not fit, so the rows add up to the total.
+fn more(rest: impl Iterator<Item = u32>) -> Option<Line> {
     let (n, k) = rest.fold((0, 0), |(n, k), c| (n + c, k + 1));
-    (k > 0).then(|| line(format!("+{n}× in {k} more {what}"), DETAIL, SECONDARY))
+    (k > 0).then(|| line(format!("+{n}× in {k} more"), DETAIL, SECONDARY))
 }
 
 /// Replaces characters the font lacks with ASCII stand-ins.
@@ -262,17 +333,49 @@ mod tests {
         assert_eq!(rub(-1000), "-1\u{2009}000");
     }
 
+    const OPTS: CardOptions =
+        CardOptions { show_non_fir: true, max_rows: 1, quests: true, hideout: true, barters: true, crafts: true };
+
     #[test]
     fn verdict_precedence_quest_over_price() {
         let mut cat = Catalog::default();
         let item = Item { id: "i".into(), short_name: "PS".into(), width: 1, height: 1, avg24h: Some(50_000), ..Default::default() };
         cat.items.insert("i".into(), item.clone());
-        assert_eq!(item_card(&cat, &item, 0.9, &Progress::default(), true).lines[1].text, "VALUABLE");
+        assert_eq!(item_card(&cat, &item, 0.9, &Progress::default(), &OPTS).lines[1].text, "VALUABLE");
         let o = crate::data::Objective { id: "o".into(), kind: "giveItem".into(), count: 2, found_in_raid: true, items: vec!["i".into()], ..Default::default() };
         cat.tasks.insert("t".into(), crate::data::Task { id: "t".into(), name: "Task".into(), objectives: vec![o], ..Default::default() });
-        let card = item_card(&cat, &item, 0.6, &Progress::default(), true);
+        let card = item_card(&cat, &item, 0.6, &Progress::default(), &OPTS);
         assert_eq!(card.lines[0].text, "PS ?");
         assert_eq!(card.lines[1].text, "KEEP – QUEST 2× (FIR)");
         assert_eq!(card.border, AMBER);
+    }
+
+    #[test]
+    fn rows_by_priority_total_follows_marked_counts_and_toggles() {
+        use crate::data::{HideoutRequirement, Objective, Station, StationLevel, Task};
+        let mut cat = Catalog::default();
+        let item = Item { id: "i".into(), short_name: "Shus".into(), width: 1, height: 1, ..Default::default() };
+        let o = Objective { id: "o".into(), kind: "giveItem".into(), count: 2, items: vec!["i".into()], ..Default::default() };
+        cat.tasks.insert("t".into(), Task { id: "t".into(), name: "Task".into(), objectives: vec![o], ..Default::default() });
+        let req = |id: &str, count| HideoutRequirement { id: id.into(), item: "i".into(), count, fir: false };
+        cat.stations.push(Station {
+            id: "s".into(),
+            name: "Stash".into(),
+            levels: vec![
+                StationLevel { id: "s-1".into(), level: 1, item_requirements: vec![req("r1", 3)], ..Default::default() },
+                StationLevel { id: "s-2".into(), level: 2, item_requirements: vec![req("r2", 5)], ..Default::default() },
+            ],
+        });
+        let opts = CardOptions { max_rows: 2, ..OPTS };
+        let text = |p: &Progress, o: &CardOptions| -> Vec<String> {
+            item_card(&cat, &item, 0.9, p, o).lines.into_iter().map(|l| l.text).collect()
+        };
+        let mut p = Progress::default();
+        assert_eq!(text(&p, &opts)[2..], ["Total 10×  (quests 2 · hideout 8)", "2× Task", "3× Stash Lv1", "+5× in 1 more"]);
+        // One Shus marked on TarkovTracker's needed-items page = hideout part count 1.
+        p.hideout_parts.insert("r1".into(), crate::progress::PartProgress { complete: false, count: 1 });
+        assert_eq!(text(&p, &opts)[2], "Total 9×  (quests 2 · hideout 7)");
+        let no_hideout = CardOptions { hideout: false, ..opts };
+        assert_eq!(text(&p, &no_hideout)[2..], ["Total 2×  (quests 2)", "2× Task"]);
     }
 }

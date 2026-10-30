@@ -103,6 +103,9 @@ pub struct StationLevel {
     pub id: String,
     pub level: u8,
     pub item_requirements: Vec<HideoutRequirement>,
+    /// (station id, level) that must be built first.
+    pub station_requirements: Vec<(String, u8)>,
+    pub trader_requirements: Vec<TraderRequirement>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -229,6 +232,15 @@ struct RawLevel {
     id: String,
     level: u8,
     item_requirements: Vec<RawHideoutReq>,
+    station_level_requirements: Vec<RawStationReq>,
+    trader_requirements: Vec<RawTraderReq>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct RawStationReq {
+    station: Option<Value>,
+    level: u8,
 }
 
 #[derive(Deserialize, Default)]
@@ -396,6 +408,21 @@ impl Catalog {
                                     count: q.count.unwrap_or(0.0).max(0.0) as u32,
                                     fir: q.attributes.and_then(|a| a.found_in_raid).unwrap_or(false),
                                 })
+                            })
+                            .collect(),
+                        station_requirements: l
+                            .station_level_requirements
+                            .iter()
+                            .filter_map(|r| Some((r.station.as_ref().and_then(ref_id)?, r.level)))
+                            .collect(),
+                        trader_requirements: l
+                            .trader_requirements
+                            .into_iter()
+                            .map(|t| TraderRequirement {
+                                trader: t.trader,
+                                requirement_type: t.requirement_type,
+                                compare_method: t.compare_method,
+                                value: t.value,
                             })
                             .collect(),
                     })

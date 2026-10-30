@@ -67,6 +67,8 @@ pub trait ProgressSource: Send + Sync {
     fn set_level(&self, level: u8) -> anyhow::Result<()>;
     /// Whether objectives must be written alongside a completed task (the tracker marks them itself).
     fn writes_objectives(&self) -> bool;
+    /// Re-reads remote progress when the snapshot is older than a few seconds; called before a scan.
+    fn refresh_if_stale(&self) {}
 }
 
 /// Toast sink: (title, body).
@@ -306,6 +308,10 @@ impl ProgressSource for LocalSource {
 
 const API: &str = "https://api.tarkovtracker.org";
 const POLL: Duration = Duration::from_secs(300);
+/// A scan re-reads progress when it is older than this. 304s keep it cheap; the free tier allows 1000 reads/day.
+const SCAN_FRESH: Duration = Duration::from_secs(20);
+/// A scan waits at most this long for the re-read; otherwise the last snapshot is shown.
+const SCAN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// A write that failed with a retryable error, persisted across restarts.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -319,6 +325,7 @@ struct Pending {
 struct TrackerState {
     snapshot: Arc<Progress>,
     etag: Option<String>,
+    last_refresh: Option<std::time::Instant>,
     /// Earliest time the pending queue may be retried.
     retry_at: Option<std::time::Instant>,
 }
@@ -386,7 +393,7 @@ impl TrackerSource {
             agent: tracker_agent()?,
             pending_path,
             notify,
-            state: Mutex::new(TrackerState { snapshot: Arc::new(Progress::default()), etag: None, retry_at: None }),
+            state: Mutex::new(TrackerState { snapshot: Arc::new(Progress::default()), etag: None, last_refresh: None, retry_at: None }),
             queue_lock: Mutex::new(()),
         });
         let weak: Weak<TrackerSource> = Arc::downgrade(&src);
@@ -412,10 +419,18 @@ impl TrackerSource {
         format!("Bearer {}", self.token)
     }
 
-    /// `GET /progress` with `If-None-Match`.
     pub fn refresh(&self) {
-        let etag = self.state.lock().unwrap().etag.clone();
-        let mut req = self.agent.get(&format!("{API}/progress")).set("Authorization", &self.auth());
+        self.refresh_within(Duration::from_secs(20));
+    }
+
+    /// `GET /progress` with `If-None-Match`.
+    fn refresh_within(&self, timeout: Duration) {
+        let etag = {
+            let mut st = self.state.lock().unwrap();
+            st.last_refresh = Some(std::time::Instant::now());
+            st.etag.clone()
+        };
+        let mut req = self.agent.get(&format!("{API}/progress")).set("Authorization", &self.auth()).timeout(timeout);
         if let Some(e) = &etag {
             req = req.set("If-None-Match", e);
         }
@@ -579,6 +594,12 @@ impl ProgressSource for TrackerSource {
 
     fn writes_objectives(&self) -> bool {
         false
+    }
+
+    fn refresh_if_stale(&self) {
+        if self.state.lock().unwrap().last_refresh.is_none_or(|t| t.elapsed() >= SCAN_FRESH) {
+            self.refresh_within(SCAN_TIMEOUT);
+        }
     }
 }
 

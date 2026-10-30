@@ -204,6 +204,14 @@ impl eframe::App for SettingsApp {
                 ui.add(egui::Slider::new(&mut self.cfg.tooltip_seconds, 0.0..=30.0).text("Tooltip timeout, s (0 = none)"));
                 ui.add(egui::Slider::new(&mut self.cfg.ui_scale, 0.75..=2.0).text("UI scale"));
                 ui.checkbox(&mut self.cfg.show_non_fir, "Show non-FIR needs");
+                ui.horizontal(|ui| {
+                    ui.label("Show on card:");
+                    ui.checkbox(&mut self.cfg.show_quests, "Quests");
+                    ui.checkbox(&mut self.cfg.show_hideout, "Hideout");
+                    ui.checkbox(&mut self.cfg.show_barters, "Barters");
+                    ui.checkbox(&mut self.cfg.show_crafts, "Crafts");
+                });
+                ui.add(egui::Slider::new(&mut self.cfg.max_rows, 0..=15).text("Quest/hideout rows"));
 
                 ui.separator();
                 ui.heading("EFT logs");

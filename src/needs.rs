@@ -29,6 +29,9 @@ pub struct TaskNeed {
     pub gate: Gate,
     pub count: u32,
     pub fir: u32,
+    /// Unfinished tasks in the prerequisite chain.
+    pub missing_prereqs: u32,
+    pub min_level: u32,
 }
 
 impl TaskNeed {
@@ -47,7 +50,7 @@ pub struct QuestNeeds {
     pub kappa: u32,
     /// Lowest player level that unlocks a future need.
     pub unlock_level: Option<u32>,
-    /// Current tasks first.
+    /// Active, then available, then the rest in unlock order (fewest missing prerequisites, lowest level).
     pub tasks: Vec<TaskNeed>,
 }
 
@@ -57,6 +60,10 @@ pub struct HideoutNeed {
     pub level: u8,
     pub remaining: u32,
     pub fir: bool,
+    /// Next level of its station with every prerequisite met.
+    pub buildable: bool,
+    /// Unbuilt station levels (own and prerequisite) plus unmet trader gates before this one.
+    pub distance: u32,
 }
 
 fn task_entry<'a>(p: &'a Progress, id: &str) -> Option<&'a crate::progress::TaskProgress> {
@@ -329,13 +336,70 @@ pub fn quest_needs(cat: &Catalog, item_id: &str, p: &Progress, show_non_fir: boo
             Gate::Conditional => n.conditional += count,
             Gate::NotApplicable | Gate::Applicable => {}
         }
-        n.tasks.push(TaskNeed { task_id: task.id.clone(), name: task.name.clone(), gate, count, fir });
+        n.tasks.push(TaskNeed {
+            task_id: task.id.clone(),
+            name: task.name.clone(),
+            gate,
+            count,
+            fir,
+            missing_prereqs: missing_prereqs(task, cat, p),
+            min_level: task.min_player_level,
+        });
     }
-    n.tasks.sort_by(|a, b| b.is_current().cmp(&a.is_current()).then(b.count.cmp(&a.count)).then(a.name.cmp(&b.name)));
+    let rank = |t: &TaskNeed| match t.gate {
+        Gate::Active => 0,
+        Gate::Available => 1,
+        _ => 2,
+    };
+    n.tasks.sort_by(|a, b| {
+        rank(a).cmp(&rank(b)).then_with(|| {
+            if rank(a) < 2 {
+                b.count.cmp(&a.count)
+            } else {
+                a.missing_prereqs.cmp(&b.missing_prereqs).then(a.min_level.cmp(&b.min_level))
+            }
+        })
+        .then(a.name.cmp(&b.name))
+    });
     n
 }
 
-/// Unbuilt station levels needing the item, one entry per level.
+/// Distinct unfinished tasks anywhere in `task`'s prerequisite chain.
+fn missing_prereqs(task: &Task, cat: &Catalog, p: &Progress) -> u32 {
+    let mut seen = std::collections::HashSet::new();
+    let mut stack: Vec<&str> = task.task_requirements.iter().map(|r| r.task.as_str()).collect();
+    while let Some(id) = stack.pop() {
+        let Some(t) = cat.tasks.get(id) else { continue };
+        if task_complete(t, p) || !seen.insert(id) {
+            continue;
+        }
+        stack.extend(t.task_requirements.iter().map(|r| r.task.as_str()));
+    }
+    seen.len() as u32
+}
+
+/// Highest built level of a station.
+fn built(cat: &Catalog, p: &Progress, station: &str) -> u8 {
+    cat.stations
+        .iter()
+        .find(|s| s.id == station)
+        .map_or(0, |s| s.levels.iter().filter(|l| p.hideout_modules.contains(&l.id)).map(|l| l.level).max().unwrap_or(0))
+}
+
+/// Adds every unbuilt (station, level) needed to reach `level` of `station`, prerequisites included.
+fn unbuilt_path(cat: &Catalog, p: &Progress, station: &str, level: u8, out: &mut std::collections::HashSet<(String, u8)>) {
+    let Some(s) = cat.stations.iter().find(|s| s.id == station) else { return };
+    for l in s.levels.iter().filter(|l| l.level > built(cat, p, station) && l.level <= level) {
+        if !out.insert((station.to_owned(), l.level)) {
+            continue;
+        }
+        for (rs, rl) in &l.station_requirements {
+            unbuilt_path(cat, p, rs, *rl, out);
+        }
+    }
+}
+
+/// Unbuilt station levels needing the item, one entry per level: buildable first, then fewest steps away.
 pub fn hideout_needs(cat: &Catalog, item_id: &str, p: &Progress) -> Vec<HideoutNeed> {
     let mut out = Vec::new();
     for station in &cat.stations {
@@ -353,10 +417,23 @@ pub fn hideout_needs(cat: &Catalog, item_id: &str, p: &Progress) -> Vec<HideoutN
                 }
             }
             if remaining > 0 {
-                out.push(HideoutNeed { station: station.name.clone(), level: level.level, remaining, fir });
+                let mut path = std::collections::HashSet::new();
+                unbuilt_path(cat, p, &station.id, level.level, &mut path);
+                let traders_unmet =
+                    level.trader_requirements.iter().filter(|r| !matches!(trader_requirement(r, p), Req::Met)).count() as u32;
+                let distance = path.len().saturating_sub(1) as u32 + traders_unmet;
+                out.push(HideoutNeed {
+                    station: station.name.clone(),
+                    level: level.level,
+                    remaining,
+                    fir,
+                    buildable: distance == 0,
+                    distance,
+                });
             }
         }
     }
+    out.sort_by(|a, b| a.distance.cmp(&b.distance).then(a.level.cmp(&b.level)).then(a.station.cmp(&b.station)));
     out
 }
 
@@ -495,8 +572,8 @@ mod tests {
             id: "s".into(),
             name: "Medstation".into(),
             levels: vec![
-                StationLevel { id: "s-1".into(), level: 1, item_requirements: vec![req("r1", 2)] },
-                StationLevel { id: "s-2".into(), level: 2, item_requirements: vec![req("r2", 5)] },
+                StationLevel { id: "s-1".into(), level: 1, item_requirements: vec![req("r1", 2)], ..Default::default() },
+                StationLevel { id: "s-2".into(), level: 2, item_requirements: vec![req("r2", 5)], ..Default::default() },
             ],
         });
         let mut p = known();
@@ -504,7 +581,48 @@ mod tests {
         p.hideout_parts.insert("r2".into(), crate::progress::PartProgress { complete: false, count: 1 });
         assert_eq!(
             hideout_needs(&c, ITEM, &p),
-            vec![HideoutNeed { station: "Medstation".into(), level: 2, remaining: 4, fir: true }]
+            vec![HideoutNeed { station: "Medstation".into(), level: 2, remaining: 4, fir: true, buildable: true, distance: 0 }]
         );
+    }
+
+    #[test]
+    fn hideout_buildable_first_then_fewest_steps() {
+        let mut c = Catalog::default();
+        let req = |id: &str| HideoutRequirement { id: id.into(), item: ITEM.into(), count: 1, fir: false };
+        let lvl = |id: &str, level, r: &str, needs: Vec<(String, u8)>| StationLevel {
+            id: id.into(),
+            level,
+            item_requirements: vec![req(r)],
+            station_requirements: needs,
+            ..Default::default()
+        };
+        c.stations.push(Station {
+            id: "a".into(),
+            name: "A".into(),
+            levels: vec![lvl("a-1", 1, "ra1", vec![]), lvl("a-2", 2, "ra2", vec![]), lvl("a-3", 3, "ra3", vec![])],
+        });
+        c.stations.push(Station { id: "b".into(), name: "B".into(), levels: vec![lvl("b-1", 1, "rb1", vec![("a".into(), 2)])] });
+        let mut p = known();
+        p.hideout_modules.insert("a-1".into());
+        let n = hideout_needs(&c, ITEM, &p);
+        let got: Vec<(&str, u8, bool, u32)> = n.iter().map(|h| (h.station.as_str(), h.level, h.buildable, h.distance)).collect();
+        // B1 needs A2 first (1 step); A3 needs A2 (1 step); tie → lower level first.
+        assert_eq!(got, vec![("A", 2, true, 0), ("B", 1, false, 1), ("A", 3, false, 1)]);
+    }
+
+    #[test]
+    fn future_tasks_in_unlock_order() {
+        let mut near = task("near", vec![obj("g1", "giveItem", 1, false)]);
+        near.min_player_level = 30;
+        let mut far = task("far", vec![obj("g2", "giveItem", 1, false)]);
+        far.task_requirements = vec![TaskRequirement { task: "p1".into(), status: vec!["complete".into()] }];
+        let mut p1 = task("p1", vec![]);
+        p1.task_requirements = vec![TaskRequirement { task: "p0".into(), status: vec!["complete".into()] }];
+        let now = task("now", vec![obj("g3", "giveItem", 1, false)]);
+        let c = catalog(vec![near, far, p1, task("p0", vec![]), now]);
+        let n = quest_needs(&c, ITEM, &known(), true);
+        let order: Vec<&str> = n.tasks.iter().map(|t| t.task_id.as_str()).collect();
+        assert_eq!(order, vec!["now", "near", "far"]);
+        assert_eq!(n.tasks[2].missing_prereqs, 2);
     }
 }
