@@ -308,8 +308,11 @@ impl ProgressSource for LocalSource {
 
 const API: &str = "https://api.tarkovtracker.org";
 const POLL: Duration = Duration::from_secs(300);
-/// A scan re-reads progress when it is older than this. 304s keep it cheap; the free tier allows 1000 reads/day.
-const SCAN_FRESH: Duration = Duration::from_secs(20);
+/// A scan re-reads progress when it is older than this: the API asks for ≥ 60 s between polls,
+/// and a 304 still counts against the daily read quota (1000 on the free tier).
+const SCAN_FRESH: Duration = Duration::from_secs(60);
+/// Scan-triggered reads stop when fewer reads than this are left today; the 5-min poll continues.
+const READ_RESERVE: u32 = 100;
 /// A scan waits at most this long for the re-read; otherwise the last snapshot is shown.
 const SCAN_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -326,6 +329,10 @@ struct TrackerState {
     snapshot: Arc<Progress>,
     etag: Option<String>,
     last_refresh: Option<std::time::Instant>,
+    /// `X-RateLimit-Remaining` from the last read, when the gateway sent it.
+    reads_left: Option<u32>,
+    /// No reads before this (daily quota hit, `Retry-After`).
+    reads_paused_until: Option<std::time::Instant>,
     /// Earliest time the pending queue may be retried.
     retry_at: Option<std::time::Instant>,
 }
@@ -345,7 +352,7 @@ pub fn tracker_agent() -> anyhow::Result<ureq::Agent> {
     Ok(ureq::AgentBuilder::new()
         .tls_connector(Arc::new(native_tls::TlsConnector::new()?))
         .timeout(Duration::from_secs(20))
-        .user_agent("ChadOverlay/0.1")
+        .user_agent("ChadOverlay/0.1 (+https://github.com/Jsisas/ChadScanner)")
         .build())
 }
 
@@ -393,7 +400,14 @@ impl TrackerSource {
             agent: tracker_agent()?,
             pending_path,
             notify,
-            state: Mutex::new(TrackerState { snapshot: Arc::new(Progress::default()), etag: None, last_refresh: None, retry_at: None }),
+            state: Mutex::new(TrackerState {
+                snapshot: Arc::new(Progress::default()),
+                etag: None,
+                last_refresh: None,
+                reads_left: None,
+                reads_paused_until: None,
+                retry_at: None,
+            }),
             queue_lock: Mutex::new(()),
         });
         let weak: Weak<TrackerSource> = Arc::downgrade(&src);
@@ -427,16 +441,25 @@ impl TrackerSource {
     fn refresh_within(&self, timeout: Duration) {
         let etag = {
             let mut st = self.state.lock().unwrap();
+            if st.reads_paused_until.is_some_and(|t| std::time::Instant::now() < t) {
+                return;
+            }
             st.last_refresh = Some(std::time::Instant::now());
             st.etag.clone()
+        };
+        let note_quota = |r: &ureq::Response| {
+            if let Some(n) = r.header("X-RateLimit-Remaining").and_then(|v| v.trim().parse().ok()) {
+                self.state.lock().unwrap().reads_left = Some(n);
+            }
         };
         let mut req = self.agent.get(&format!("{API}/progress")).set("Authorization", &self.auth()).timeout(timeout);
         if let Some(e) = &etag {
             req = req.set("If-None-Match", e);
         }
         match req.call() {
-            Ok(r) if r.status() == 304 => {}
+            Ok(r) if r.status() == 304 => note_quota(&r),
             Ok(r) => {
+                note_quota(&r);
                 let tag = r.header("ETag").map(str::to_owned);
                 match r.into_json::<Value>() {
                     Ok(v) => {
@@ -446,6 +469,12 @@ impl TrackerSource {
                     }
                     Err(e) => log::warn!("TarkovTracker {}: progress unreadable: {e}", self.mode.key()),
                 }
+            }
+            Err(ureq::Error::Status(429, r)) => {
+                note_quota(&r);
+                let wait = r.header("Retry-After").and_then(|v| v.trim().parse().ok()).unwrap_or(600);
+                log::warn!("TarkovTracker {}: GET /progress: 429, pausing reads for {wait} s", self.mode.key());
+                self.state.lock().unwrap().reads_paused_until = Some(std::time::Instant::now() + Duration::from_secs(wait));
             }
             Err(ureq::Error::Status(code @ (401 | 403), _)) => {
                 log::warn!("TarkovTracker {}: GET /progress: {code}", self.mode.key());
@@ -597,7 +626,11 @@ impl ProgressSource for TrackerSource {
     }
 
     fn refresh_if_stale(&self) {
-        if self.state.lock().unwrap().last_refresh.is_none_or(|t| t.elapsed() >= SCAN_FRESH) {
+        let due = {
+            let st = self.state.lock().unwrap();
+            st.last_refresh.is_none_or(|t| t.elapsed() >= SCAN_FRESH) && st.reads_left.is_none_or(|n| n > READ_RESERVE)
+        };
+        if due {
             self.refresh_within(SCAN_TIMEOUT);
         }
     }
