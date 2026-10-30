@@ -185,9 +185,9 @@ fn place(at: (i32, i32), w: i32, h: i32) -> (i32, i32) {
     (x.max(l), y.max(t))
 }
 
-/// Silhouette chad on amber (`assets/tray.svg`); readable at tray size.
+/// The exe icon (`assets/icon.svg`).
 fn tray_icon() -> anyhow::Result<tray_icon::Icon> {
-    let img = image::load_from_memory(include_bytes!("../../assets/tray-32.png"))?.to_rgba8();
+    let img = image::load_from_memory(include_bytes!("../../assets/icon-32.png"))?.to_rgba8();
     let (w, h) = img.dimensions();
     Ok(tray_icon::Icon::from_rgba(img.into_raw(), w, h)?)
 }

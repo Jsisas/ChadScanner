@@ -100,5 +100,5 @@ layout) on Linux.
 
 ## Icons
 
-`assets/icon.svg` (exe, Settings window) and `assets/tray.svg` (tray). The PNGs next to them are rendered
-from the SVGs; `build.rs` embeds `icon-*.png` in the exe.
+`assets/icon.svg` is the exe, tray and Settings window icon. The PNGs next to it are rendered from the
+SVG; `build.rs` embeds `icon-*.png` in the exe.
