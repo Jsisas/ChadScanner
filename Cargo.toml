@@ -20,7 +20,7 @@ simplelog = "0.12"
 anyhow = "1"
 
 [target.'cfg(windows)'.dependencies]
-eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts"] }
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard"] }
 rfd = "0.15"
 tray-icon = "0.21"
 windows = { version = "0.58", features = [

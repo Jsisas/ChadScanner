@@ -68,7 +68,9 @@ pub fn message(title: &str, body: &str, border: Rgb) -> Card {
 
 pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, show_non_fir: bool) -> Card {
     let q = needs::quest_needs(cat, &item.id, p, show_non_fir);
-    let hideout = needs::hideout_needs(cat, &item.id, p);
+    let mut hideout = needs::hideout_needs(cat, &item.id, p);
+    // Nearest upgrades first.
+    hideout.sort_by(|a, b| a.level.cmp(&b.level).then(b.remaining.cmp(&a.remaining)));
     let hideout_total: u32 = hideout.iter().map(|h| h.remaining).sum();
     let (barters, crafts) = needs::recipes_using(cat, &item.id);
     let best = item.best_trader();
@@ -106,13 +108,25 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, show_non_
         let color = if t.is_current() { TEXT } else { SECONDARY };
         lines.push(line(format!("{}× {}", t.count, t.name), DETAIL, color));
     }
-    for h in hideout.iter().take(2) {
+    if let Some(l) = more(q.tasks.iter().skip(3).map(|t| t.count), "tasks") {
+        lines.push(l);
+    }
+    for h in hideout.iter().take(3) {
         lines.push(line(format!("{}× {} Lv{}", h.remaining, h.station, h.level), DETAIL, TEXT));
+    }
+    if let Some(l) = more(hideout.iter().skip(3).map(|h| h.remaining), "upgrades") {
+        lines.push(l);
     }
     if barters + crafts > 0 {
         lines.push(line(format!("Barters: {barters} · Crafts: {crafts}"), DETAIL, SECONDARY));
     }
     Card { border: color, lines }
+}
+
+/// `+n× in k more <what>` for list entries that did not fit, so the lines add up to the verdict total.
+fn more(rest: impl Iterator<Item = u32>, what: &str) -> Option<Line> {
+    let (n, k) = rest.fold((0, 0), |(n, k), c| (n + c, k + 1));
+    (k > 0).then(|| line(format!("+{n}× in {k} more {what}"), DETAIL, SECONDARY))
 }
 
 /// Replaces characters the font lacks with ASCII stand-ins.
