@@ -26,8 +26,12 @@ public partial class FloatingTooltip : Window {
 
 	private Vector2? _mouseStartPosition;
 
+	/// <summary>Opacity from the XAML, restored after the window has rendered its new content.</summary>
+	private readonly double _visibleOpacity;
+
 	private FloatingTooltip() {
 		InitializeComponent();
+		_visibleOpacity = Opacity;
 		Hide();
 		DataContext = new MenuVM(RatScannerMain.Instance);
 		RatScannerMain.Instance.ItemScans.Enqueued += OnItemScanEnqueued;
@@ -136,7 +140,14 @@ public partial class FloatingTooltip : Window {
 		Top = Math.Max(0, Math.Min(screenHeight, mousePosition.Y / dpi - MouseMovementUntilHide + size.Height) - size.Height);
 		Left = Math.Max(0, Math.Min(screenWidth, mousePosition.X / dpi - MouseMovementUntilHide + size.Width) - size.Width);
 
+		if (IsVisible) return;
+
+		// A transparent window shows its last rendered frame (the previous item) the moment
+		// it is shown. Show it invisible and restore the opacity once the new content has
+		// rendered: ContextIdle runs after the Render pass.
+		Opacity = 0;
 		Show();
+		_ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle, () => Opacity = _visibleOpacity);
 	}
 
 	private static void AddSection(Panel panel, string title) {
