@@ -80,10 +80,7 @@ public class TarkovTrackerDB {
 		if (string.IsNullOrWhiteSpace(taskId)) return;
 		EnsureWritableToken();
 
-		_ = APIClient.Post(
-			$"{RatConfig.Tracking.TarkovTracker.Endpoint}/progress/task/{Uri.EscapeDataString(taskId)}",
-			new { state },
-			Token!);
+		Post($"progress/task/{Uri.EscapeDataString(taskId)}", new { state }, $"task {taskId} -> {state}");
 		RefreshAfterWrite();
 	}
 
@@ -93,10 +90,8 @@ public class TarkovTrackerDB {
 
 		var state = complete ? "completed" : "uncompleted";
 		object body = count.HasValue ? new { state, count } : new { state };
-		_ = APIClient.Post(
-			$"{RatConfig.Tracking.TarkovTracker.Endpoint}/progress/task/objective/{Uri.EscapeDataString(objectiveId)}",
-			body,
-			Token!);
+		Post($"progress/task/objective/{Uri.EscapeDataString(objectiveId)}", body,
+			$"objective {objectiveId} -> {state}{(count.HasValue ? $" ({count})" : "")}");
 		RefreshAfterWrite();
 	}
 
@@ -104,11 +99,17 @@ public class TarkovTrackerDB {
 		if (string.IsNullOrWhiteSpace(objectiveId)) return;
 		EnsureWritableToken();
 
-		_ = APIClient.Post(
-			$"{RatConfig.Tracking.TarkovTracker.Endpoint}/progress/task/objective/{Uri.EscapeDataString(objectiveId)}",
-			new { count },
-			Token!);
+		Post($"progress/task/objective/{Uri.EscapeDataString(objectiveId)}", new { count }, $"objective {objectiveId} -> count {count}");
 		RefreshAfterWrite();
+	}
+
+	/// <summary>
+	/// Writes to TarkovTracker and logs the reply, so a write that the API accepted is
+	/// distinguishable from one that was never sent. Failures throw to the caller.
+	/// </summary>
+	private void Post(string path, object body, string what) {
+		var reply = APIClient.Post($"{RatConfig.Tracking.TarkovTracker.Endpoint}/{path}", body, Token!);
+		Logger.LogInfo($"TarkovTracker {_mode}: {what}: {reply}");
 	}
 
 	private void EnsureWritableToken() {
