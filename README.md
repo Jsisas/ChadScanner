@@ -14,6 +14,10 @@
 </a>
 </div>
 
+> **ChadScanner** is a fork of [RatScanner](https://github.com/RatScanner/RatScanner) by the RatScanner team.
+> It replaces RatScanner's icon recognition with [ChadVision](https://github.com/Jsisas/ChadVision) (Rust, DINOv2 + OCR) and adds a floating tooltip, per-section overlay toggles, manual hideout progress and quest tracking from EFT logs.
+> Build for Windows from WSL2 with `tools/build-wsl.sh`. All credit for the original app goes to upstream; please support them via the links below.
+
 # Rat Scanner
 
 Rat Scanner is a open source tool for [Escape from Tarkov][escape-from-tarkov].
