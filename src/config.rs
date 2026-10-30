@@ -111,8 +111,6 @@ pub struct Config {
     pub show_hideout: bool,
     pub show_barters: bool,
     pub show_crafts: bool,
-    /// Non-FIR needs for items obtainable now for at most this much (₽ each) are "buy later". 0 = off.
-    pub buy_later_max: i64,
     pub log_tracking: bool,
     pub logs_override: String,
 }
@@ -133,7 +131,6 @@ impl Default for Config {
             show_hideout: true,
             show_barters: true,
             show_crafts: true,
-            buy_later_max: 20_000,
             log_tracking: true,
             logs_override: String::new(),
         }

@@ -3,7 +3,6 @@
 #![cfg_attr(not(windows), allow(dead_code))]
 //! ChadOverlay: item info for Escape from Tarkov as a floating tooltip.
 
-mod acquire;
 mod card;
 mod config;
 mod data;

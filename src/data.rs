@@ -26,18 +26,6 @@ pub struct Item {
     pub height: i64,
     pub avg24h: Option<i64>,
     pub sell_to_trader: Vec<TraderPrice>,
-    pub buy_from_trader: Vec<TraderOffer>,
-    /// Banned from the flea market.
-    pub no_flea: bool,
-}
-
-/// A trader cash offer.
-#[derive(Debug, Clone, Default)]
-pub struct TraderOffer {
-    pub trader: String,
-    pub price_rub: i64,
-    pub min_trader_level: u32,
-    pub task_unlock: Option<String>,
 }
 
 impl Item {
@@ -130,13 +118,7 @@ pub struct Station {
 /// Barter or craft: only the inputs matter here.
 #[derive(Debug, Clone, Default)]
 pub struct Recipe {
-    /// (item id, count).
-    pub inputs: Vec<(String, f64)>,
-    pub offered: Option<String>,
-    /// Barters only.
-    pub trader: String,
-    pub min_trader_level: u32,
-    pub task_unlock: Option<String>,
+    pub required_items: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -148,10 +130,6 @@ pub struct Catalog {
     pub crafts: Vec<Recipe>,
     /// Trader id → name.
     pub traders: HashMap<String, String>,
-    /// Trader id → (loyalty level, required player level).
-    pub trader_levels: HashMap<String, Vec<(u32, u32)>>,
-    /// Player level that unlocks the flea market.
-    pub flea_min_level: u32,
     /// Story-chain counter id → (required value, task id) of every task it gates.
     pub chains: HashMap<String, Vec<(f64, String)>>,
 }
@@ -175,18 +153,6 @@ struct RawItem {
     height: i64,
     avg24h_price: Option<f64>,
     sell_to_trader: Vec<RawTraderPrice>,
-    buy_from_trader: Vec<RawTraderOffer>,
-    types: Vec<String>,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-struct RawTraderOffer {
-    trader: String,
-    #[serde(rename = "priceRUB")]
-    price_rub: Option<f64>,
-    min_trader_level: Option<u32>,
-    task_unlock: Option<Value>,
 }
 
 #[derive(Deserialize, Default)]
@@ -289,24 +255,12 @@ struct RawStation {
 #[serde(default)]
 struct RawCount {
     item: Option<Value>,
-    count: Option<f64>,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 struct RawRecipe {
     required_items: Vec<RawCount>,
-    offered_item: Option<RawCount>,
-    trader: Option<Value>,
-    min_trader_level: Option<u32>,
-    task_unlock: Option<Value>,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-struct RawTraderLevel {
-    level: u32,
-    required_player_level: Option<u32>,
 }
 
 #[derive(Deserialize, Default)]
@@ -314,7 +268,6 @@ struct RawTraderLevel {
 struct RawTrader {
     id: String,
     name: String,
-    levels: Vec<RawTraderLevel>,
 }
 
 /// An item reference: either an id string or an object with an `id`.
@@ -364,18 +317,6 @@ impl Catalog {
                         .into_iter()
                         .map(|t| TraderPrice { trader: t.trader, price_rub: t.price_rub.unwrap_or(0.0) as i64 })
                         .collect(),
-                    buy_from_trader: r
-                        .buy_from_trader
-                        .into_iter()
-                        .filter(|o| o.price_rub.is_some_and(|p| p > 0.0))
-                        .map(|o| TraderOffer {
-                            trader: o.trader,
-                            price_rub: o.price_rub.unwrap_or(0.0) as i64,
-                            min_trader_level: o.min_trader_level.unwrap_or(1),
-                            task_unlock: o.task_unlock.as_ref().and_then(ref_id),
-                        })
-                        .collect(),
-                    no_flea: r.types.iter().any(|t| t == "noFlea"),
                     id: r.id,
                 };
                 (item.id.clone(), item)
@@ -498,41 +439,14 @@ impl Catalog {
             let raw: Vec<RawRecipe> = serde_json::from_value(data(body(name)?)?)?;
             Ok(raw
                 .into_iter()
-                .map(|r| Recipe {
-                    inputs: r
-                        .required_items
-                        .iter()
-                        .filter_map(|c| Some((c.item.as_ref().and_then(ref_id)?, c.count.unwrap_or(1.0))))
-                        .collect(),
-                    offered: r.offered_item.and_then(|c| c.item.as_ref().and_then(ref_id)),
-                    trader: r.trader.as_ref().and_then(ref_id).unwrap_or_default(),
-                    min_trader_level: r.min_trader_level.unwrap_or(1),
-                    task_unlock: r.task_unlock.as_ref().and_then(ref_id),
-                })
+                .map(|r| Recipe { required_items: r.required_items.iter().filter_map(|c| c.item.as_ref().and_then(ref_id)).collect() })
                 .collect())
         };
 
         let raw_traders: HashMap<String, RawTrader> = serde_json::from_value(data(body("traders")?)?)?;
-        let mut traders = HashMap::new();
-        let mut trader_levels = HashMap::new();
-        for t in raw_traders.into_values() {
-            trader_levels.insert(t.id.clone(), t.levels.iter().map(|l| (l.level, l.required_player_level.unwrap_or(0))).collect());
-            traders.insert(t.id, tr(&traders_en, &t.name));
-        }
-        let flea_min_level =
-            items_data.pointer("/fleaMarket/minPlayerLevel").and_then(Value::as_u64).unwrap_or(15) as u32;
+        let traders = raw_traders.into_values().map(|t| (t.id, tr(&traders_en, &t.name))).collect();
 
-        Ok(Catalog {
-            items,
-            tasks,
-            stations,
-            barters: recipes("barters")?,
-            crafts: recipes("crafts")?,
-            traders,
-            trader_levels,
-            flea_min_level,
-            chains,
-        })
+        Ok(Catalog { items, tasks, stations, barters: recipes("barters")?, crafts: recipes("crafts")?, traders, chains })
     }
 }
 
@@ -655,8 +569,7 @@ mod tests {
         assert_eq!(c.stations[0].name, "Stash");
         assert!(c.stations[0].levels[0].item_requirements[0].fir);
         assert_eq!(c.traders["t1"], "Prapor");
-        assert_eq!(c.barters[0].inputs, vec![("a".to_owned(), 155.1)]);
-        assert_eq!(c.barters[0].offered.as_deref(), Some("b"));
+        assert_eq!(c.barters[0].required_items, vec!["a"]);
         assert_eq!(c.chains["v"], vec![(3.0, "q".to_owned())]);
     }
 }

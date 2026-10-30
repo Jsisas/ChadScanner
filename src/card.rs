@@ -1,6 +1,5 @@
 //! The floating card: content from catalog + progress, rendered into a premultiplied pixmap.
 use crate::data::{Catalog, Item};
-use crate::acquire::{self, Availability, Buy};
 use crate::needs;
 use crate::progress::Progress;
 use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
@@ -78,7 +77,6 @@ pub struct CardOptions {
     pub hideout: bool,
     pub barters: bool,
     pub crafts: bool,
-    pub buy_later_max: i64,
 }
 
 impl CardOptions {
@@ -90,7 +88,6 @@ impl CardOptions {
             hideout: c.show_hideout,
             barters: c.show_barters,
             crafts: c.show_crafts,
-            buy_later_max: c.buy_later_max,
         }
     }
 }
@@ -99,60 +96,31 @@ impl CardOptions {
 /// other tasks in unlock order, other hideout levels in unlock order.
 struct Row {
     rank: u8,
-    keep: bool,
     count: u32,
     text: String,
     color: Rgb,
 }
 
-fn availability_line(cat: &Catalog, a: &Availability, p: &Progress) -> Option<String> {
-    let trader = |id: &str| cat.traders.get(id).cloned().unwrap_or_else(|| id.to_owned());
-    Some(match a {
-        // The flea line below already shows it.
-        Availability::Now(Buy::Flea(_)) => return None,
-        Availability::Now(Buy::Trader { trader: t, level, price }) => format!("Buy: {} LL{level} {} ₽", trader(t), rub(*price)),
-        Availability::Now(Buy::Barter { trader: t, level, cost }) => format!("Barter: {} LL{level} ≈{} ₽", trader(t), rub(*cost)),
-        Availability::FleaAt(l) => match p.level {
-            Some(you) => format!("Not buyable until flea (Lv{l}, you {you}) – collect"),
-            None => format!("Not buyable until flea (Lv{l}) – collect"),
-        },
-        Availability::Collect => "Can't be bought now – collect".into(),
-        Availability::Unknown => return None,
-    })
-}
-
 pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardOptions) -> Card {
     let q = if o.quests { needs::quest_needs(cat, &item.id, p, o.show_non_fir) } else { Default::default() };
     let hideout = if o.hideout { needs::hideout_needs(cat, &item.id, p) } else { Vec::new() };
-    let avail = acquire::availability(cat, item, p);
-    // Non-FIR needs of an item that is cheap to obtain now need not take stash space.
-    let buyable = acquire::buy_later(&avail, o.buy_later_max);
-    let task_keep = |t: &needs::TaskNeed| if buyable { t.fir } else { t.count };
-    let hideout_keep = |h: &needs::HideoutNeed| if buyable && !h.fir { 0 } else { h.remaining };
-
     let quest_total: u32 = q.tasks.iter().map(|t| t.count).sum();
     let hideout_total: u32 = hideout.iter().map(|h| h.remaining).sum();
+    let buildable: u32 = hideout.iter().filter(|h| h.buildable).map(|h| h.remaining).sum();
     let total = quest_total + hideout_total;
-    let keep_current: u32 = q.tasks.iter().filter(|t| t.is_current()).map(task_keep).sum();
-    let current_fir = q.tasks.iter().any(|t| t.is_current() && t.fir > 0);
-    let keep_buildable: u32 = hideout.iter().filter(|h| h.buildable).map(hideout_keep).sum();
-    let keep_kappa: u32 = q.tasks.iter().filter(|t| t.kappa).map(task_keep).sum();
-    let keep_total: u32 = q.tasks.iter().map(task_keep).sum::<u32>() + hideout.iter().map(hideout_keep).sum::<u32>();
     let (barters, crafts) = needs::recipes_using(cat, &item.id);
     let best = item.best_trader();
 
     let title = if score < 0.7 { format!("{} ?", item.short_name) } else { item.short_name.clone() };
-    let (verdict, color) = if keep_current > 0 {
-        let fir = if current_fir { " (FIR)" } else { "" };
-        (format!("KEEP – QUEST {keep_current}×{fir}"), AMBER)
-    } else if keep_buildable > 0 {
-        (format!("KEEP – HIDEOUT {keep_buildable}×"), AMBER)
-    } else if keep_kappa > 0 {
-        (format!("KEEP – KAPPA {keep_kappa}×"), PURPLE)
-    } else if keep_total > 0 {
-        (format!("KEEP – LATER {keep_total}×"), LATER)
+    let (verdict, color) = if q.current > 0 {
+        let fir = if q.current_fir > 0 { " (FIR)" } else { "" };
+        (format!("KEEP – QUEST {}×{fir}", q.current), AMBER)
+    } else if buildable > 0 {
+        (format!("KEEP – HIDEOUT {buildable}×"), AMBER)
+    } else if q.kappa > 0 {
+        (format!("KEEP – KAPPA {}×", q.kappa), PURPLE)
     } else if total > 0 {
-        (format!("BUY LATER {total}×"), TEXT)
+        (format!("KEEP – LATER {total}×"), LATER)
     } else {
         // Items without a flea price are judged by their best trader offer.
         let slots = (item.width * item.height).max(1);
@@ -174,9 +142,6 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardO
             .map(|(_, n, what)| format!("{what} {n}"))
             .collect();
         lines.push(line(format!("Total {total}×  ({})", parts.join(" · ")), VALUE, TEXT));
-        if let Some(a) = availability_line(cat, &avail, p) {
-            lines.push(line(a, DETAIL, SECONDARY));
-        }
     }
     if let (Some(avg), Some(per)) = (item.avg24h, item.price_per_slot()) {
         lines.push(line(format!("Flea {} ₽  ·  {} ₽/slot", rub(avg), rub(per)), VALUE, TEXT));
@@ -186,42 +151,28 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardO
         lines.push(line(format!("{name} {} ₽", rub(b.price_rub)), VALUE, TEXT));
     }
 
-    // Priority: active task, available task, buildable hideout, other tasks, other hideout;
-    // within each, needs to keep before needs that can be bought later.
-    let buy_tag = |keep: u32| if keep == 0 { " · buy" } else { "" };
+    // Both lists arrive in their own priority order; the stable sort interleaves them by rank.
     let mut rows: Vec<Row> = q
         .tasks
         .iter()
-        .map(|t| {
-            let keep = task_keep(t);
-            let lvl = match p.level {
-                Some(l) if !t.is_current() && u32::from(l) < t.min_level => format!(" (Lv{})", t.min_level),
-                _ => String::new(),
-            };
-            Row {
-                rank: match t.gate {
-                    needs::Gate::Active => 0,
-                    needs::Gate::Available => 1,
-                    _ => 3,
-                },
-                keep: keep > 0,
-                count: t.count,
-                text: format!("{}× {}{lvl}{}", t.count, t.name, buy_tag(keep)),
-                color: if t.is_current() && keep > 0 { TEXT } else { SECONDARY },
-            }
+        .map(|t| Row {
+            rank: match t.gate {
+                needs::Gate::Active => 0,
+                needs::Gate::Available => 1,
+                _ => 3,
+            },
+            count: t.count,
+            text: format!("{}× {}", t.count, t.name),
+            color: if t.is_current() { TEXT } else { SECONDARY },
         })
-        .chain(hideout.iter().map(|h| {
-            let keep = hideout_keep(h);
-            Row {
-                rank: if h.buildable { 2 } else { 4 },
-                keep: keep > 0,
-                count: h.remaining,
-                text: format!("{}× {} Lv{}{}", h.remaining, h.station, h.level, buy_tag(keep)),
-                color: if h.buildable && keep > 0 { TEXT } else { SECONDARY },
-            }
+        .chain(hideout.iter().map(|h| Row {
+            rank: if h.buildable { 2 } else { 4 },
+            count: h.remaining,
+            text: format!("{}× {} Lv{}", h.remaining, h.station, h.level),
+            color: if h.buildable { TEXT } else { SECONDARY },
         }))
         .collect();
-    rows.sort_by_key(|r| (r.rank, !r.keep));
+    rows.sort_by_key(|r| r.rank);
     let shown = o.max_rows as usize;
     for r in rows.iter().take(shown) {
         lines.push(line(r.text.clone(), DETAIL, r.color));
@@ -383,7 +334,7 @@ mod tests {
     }
 
     const OPTS: CardOptions =
-        CardOptions { show_non_fir: true, max_rows: 1, quests: true, hideout: true, barters: true, crafts: true, buy_later_max: 20_000 };
+        CardOptions { show_non_fir: true, max_rows: 1, quests: true, hideout: true, barters: true, crafts: true };
 
     #[test]
     fn verdict_precedence_quest_over_price() {
@@ -426,29 +377,5 @@ mod tests {
         assert_eq!(text(&p, &opts)[2], "Total 9×  (quests 2 · hideout 7)");
         let no_hideout = CardOptions { hideout: false, ..opts };
         assert_eq!(text(&p, &no_hideout)[2..], ["Total 2×  (quests 2)", "2× Task"]);
-    }
-
-    #[test]
-    fn cheap_non_fir_need_is_buy_later_fir_or_locked_flea_is_keep() {
-        use crate::data::{Objective, Task};
-        let mut cat = Catalog { flea_min_level: 15, ..Default::default() };
-        let item = Item { id: "i".into(), short_name: "Bolts".into(), width: 1, height: 1, avg24h: Some(5_000), ..Default::default() };
-        let quest = |fir| {
-            let o = Objective { id: "o".into(), kind: "giveItem".into(), count: 2, found_in_raid: fir, items: vec!["i".into()], ..Default::default() };
-            Task { id: "t".into(), name: "Task".into(), objectives: vec![o], ..Default::default() }
-        };
-        let p = |l| Progress { level: Some(l), ..Default::default() };
-        let text = |cat: &Catalog, p: &Progress| -> Vec<String> {
-            item_card(cat, &item, 0.9, p, &OPTS).lines.into_iter().map(|l| l.text).collect()
-        };
-        cat.tasks.insert("t".into(), quest(false));
-        let t = text(&cat, &p(20));
-        assert_eq!(t[1], "BUY LATER 2×");
-        assert!(t.contains(&"2× Task · buy".to_owned()));
-        // Flea still locked: nothing to buy it with yet, so keep the found ones.
-        assert_eq!(text(&cat, &p(10))[1], "KEEP – QUEST 2×");
-        assert!(text(&cat, &p(10)).iter().any(|l| l.starts_with("Not buyable until flea (Lv15, you 10)")));
-        cat.tasks.insert("t".into(), quest(true));
-        assert_eq!(text(&cat, &p(20))[1], "KEEP – QUEST 2× (FIR)");
     }
 }
