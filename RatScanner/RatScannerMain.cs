@@ -551,11 +551,21 @@ public class RatScannerMain : INotifyPropertyChanged {
 
 			using var crop = screenshot.Clone(new Rectangle(x0, y0, x1 - x0, y1 - y0), PixelFormat.Format24bppRgb);
 			var candidates = vision.Identify(crop, slotsW, slotsH);
-			if (candidates.Length == 0) return null;
+			Logger.LogDebugBitmap(screenshot, "scan-screenshot");
+			Logger.LogDebugBitmap(crop, "scan-chadvision-crop");
+			Logger.LogDebug($"ChadVision crop {x0},{y0} {x1 - x0}x{y1 - y0} slots {slotsW}x{slotsH} (RatEye icon {icon.Position} size {icon.Size}, RatEye guess {icon.Item?.ShortName}); top: "
+				+ string.Join(", ", candidates.Take(3).Select(c => $"{TarkovDevAPI.GetItems().FirstOrDefault(i => i.Id == c.Id)?.ShortName ?? c.Id} {c.Score:0.000}")));
+			if (candidates.Length == 0) {
+				Logger.LogDebug("ChadVision returned no candidates, falling back to RatEye");
+				return null;
+			}
 
 			var (id, score) = candidates[0];
 			var item = TarkovDevAPI.GetItems().FirstOrDefault(i => i.Id == id);
-			if (item == null) return null;
+			if (item == null) {
+				Logger.LogDebug($"ChadVision id {id} not in tarkov.dev items, falling back to RatEye");
+				return null;
+			}
 
 			return new ItemIconScan(icon, item, score, toolTipPosition, RatConfig.ToolTip.Duration);
 		} catch (Exception e) {
