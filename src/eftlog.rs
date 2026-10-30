@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn catch_up_then_live_tail() {
-        let root = std::env::temp_dir().join(format!("chadoverlay-logs-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("chadscanner-logs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let s1 = root.join("log_2026.10.30_9-00-00_1.0");
         std::fs::create_dir_all(&s1).unwrap();

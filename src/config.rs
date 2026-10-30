@@ -1,4 +1,4 @@
-//! `%APPDATA%\ChadOverlay\config.json` and the app's file locations.
+//! `%APPDATA%\ChadScanner\config.json` and the app's file locations.
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -238,9 +238,14 @@ pub struct Paths {
 impl Paths {
     pub fn detect() -> anyhow::Result<Paths> {
         let exe_dir = std::env::current_exe()?.parent().map(Path::to_path_buf).unwrap_or_default();
-        let appdata = directories::BaseDirs::new()
-            .map(|d| d.config_dir().join("ChadOverlay"))
-            .ok_or_else(|| anyhow::anyhow!("no APPDATA directory"))?;
+        let base = directories::BaseDirs::new().ok_or_else(|| anyhow::anyhow!("no APPDATA directory"))?;
+        let mut appdata = base.config_dir().join("ChadScanner");
+        // Settings, progress and reports from before the rename (the app was called ChadOverlay).
+        // If the move fails (e.g. the old app still runs), keep using the old folder.
+        let old = base.config_dir().join("ChadOverlay");
+        if !appdata.exists() && old.is_dir() && std::fs::rename(&old, &appdata).is_err() {
+            appdata = old;
+        }
         std::fs::create_dir_all(appdata.join("cache"))?;
         Ok(Paths { data: exe_dir.join("data"), appdata })
     }

@@ -80,8 +80,8 @@ impl Layered {
     unsafe fn create() -> anyhow::Result<Layered> {
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-            w!("ChadOverlayCard"),
-            w!("ChadOverlay"),
+            w!("ChadScannerCard"),
+            w!("ChadScanner"),
             WS_POPUP,
             0,
             0,
@@ -199,7 +199,7 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions) -> anyhow::Res
         let class = WNDCLASSW {
             lpfnWndProc: Some(wndproc),
             hInstance: GetModuleHandleW(None)?.into(),
-            lpszClassName: w!("ChadOverlayCard"),
+            lpszClassName: w!("ChadScannerCard"),
             ..Default::default()
         };
         RegisterClassW(&class);
@@ -219,7 +219,7 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions) -> anyhow::Res
         menu.append_items(&[&settings, &pause, &PredefinedMenuItem::separator(), &quit])?;
         let _tray = tray_icon::TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_tooltip("ChadOverlay")
+            .with_tooltip("ChadScanner")
             .with_icon(tray_icon()?)
             .build()?;
 

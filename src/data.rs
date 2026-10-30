@@ -534,7 +534,7 @@ fn agent() -> anyhow::Result<ureq::Agent> {
     Ok(ureq::AgentBuilder::new()
         .tls_connector(Arc::new(native_tls::TlsConnector::new()?))
         .timeout(Duration::from_secs(60))
-        .user_agent("ChadOverlay/0.1 (+https://github.com/Jsisas/ChadScanner)")
+        .user_agent("ChadScanner/0.1 (+https://github.com/Jsisas/ChadScanner)")
         .build())
 }
 

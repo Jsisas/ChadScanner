@@ -263,7 +263,7 @@ impl App {
     }
 
     /// Ctrl+Shift+F12: writes the last scan (screenshot, candidates, decision), the screen now
-    /// and the log tail to `%APPDATA%\ChadOverlay\reports\<time>\`.
+    /// and the log tail to `%APPDATA%\ChadScanner\reports\<time>\`.
     pub fn debug_report(self: &Arc<Self>) {
         let app = self.clone();
         let (x, y) = win::cursor_pos();

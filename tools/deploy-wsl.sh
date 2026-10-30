@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds ChadOverlay for Windows from WSL2/Linux and publishes it with ChadVision's data.
+# Builds ChadScanner for Windows from WSL2/Linux and publishes it with ChadVision's data.
 # Rerun-safe: overwrites the exe, the ONNX Runtime DLL and data/ in the output folder.
 #
 # Usage: tools/deploy-wsl.sh [--out DIR] [--chadvision DIR]
@@ -57,18 +57,20 @@ if [[ ! -f "$ORT_DLL" ]]; then
 	rm -rf "$tmp"
 fi
 
-step "Building chadoverlay.exe ($TARGET)"
+step "Building chadscanner.exe ($TARGET)"
 cd "$ROOT"
 cargo xwin build --release --target "$TARGET"
-EXE="$ROOT/target/$TARGET/release/chadoverlay.exe"
+EXE="$ROOT/target/$TARGET/release/chadscanner.exe"
 
 step "Publishing to $OUT"
 TASKLIST="$(command -v tasklist.exe || echo /mnt/c/Windows/System32/tasklist.exe)"
 # Capture first: with pipefail, `grep -q` closing the pipe early would make the check fail silently.
-if [[ -x "$TASKLIST" ]] && grep -qi '^chadoverlay.exe' <<<"$("$TASKLIST" 2>/dev/null)"; then
-	die "chadoverlay.exe is running on Windows; quit it from the tray first (files would be locked)"
+# chadoverlay.exe: the same app before its rename.
+if [[ -x "$TASKLIST" ]] && grep -qiE '^(chadscanner|chadoverlay)\.exe' <<<"$("$TASKLIST" 2>/dev/null)"; then
+	die "ChadScanner is running on Windows; quit it from the tray first (files would be locked)"
 fi
 mkdir -p "$OUT"
+rm -f "$OUT/chadoverlay.exe"
 cp "$EXE" "$ORT_DLL" "$OUT/"
 # Mirror (not merge) so icons removed upstream do not linger. Same files build-wsl.sh stages.
 rm -rf "$OUT/data"
@@ -79,11 +81,11 @@ cp -r "$CV/data/models" "$CV/data/index" "$OUT/data/"
 
 step "Verifying"
 missing=0
-for f in chadoverlay.exe onnxruntime.dll data/refs/catalog.json data/refs/base data/index/embed_ids.txt \
+for f in chadscanner.exe onnxruntime.dll data/refs/catalog.json data/refs/base data/index/embed_ids.txt \
 	data/models/dinov2-small.onnx data/models/ppocrv5_latin_rec.onnx data/models/ppocrv5_latin_dict.txt; do
 	[[ -e "$OUT/$f" ]] || { echo "missing: $OUT/$f" >&2; missing=1; }
 done
 [[ $missing -eq 0 ]] || die "publish incomplete"
 
 step "Done"
-echo "Run on Windows: $(wslpath -w "$OUT" 2>/dev/null || echo "$OUT")\\chadoverlay.exe (EFT in borderless mode)"
+echo "Run on Windows: $(wslpath -w "$OUT" 2>/dev/null || echo "$OUT")\\chadscanner.exe (EFT in borderless mode)"

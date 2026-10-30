@@ -1,4 +1,4 @@
-//! Settings window (`chadoverlay.exe --settings`), a separate process started from the tray.
+//! Settings window (`chadscanner.exe --settings`), a separate process started from the tray.
 //! Every change is saved to `config.json` at once; the running overlay picks it up within a second.
 use crate::config::{Config, Goal, Hotkey, Mode, Paths, Source};
 use crate::data::{self, Catalog};
@@ -351,7 +351,7 @@ impl SettingsApp {
     }
 
     fn about_page(&mut self, ui: &mut egui::Ui) {
-        section(ui, "ChadOverlay", |ui| {
+        section(ui, "ChadScanner", |ui| {
             ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
             hint(ui, "Item data: json.tarkov.dev · Recognition: ChadVision");
             ui.horizontal(|ui| {
@@ -427,11 +427,11 @@ fn window_icon() -> egui::IconData {
 pub fn run(paths: Paths) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("ChadOverlay Settings")
+            .with_title("ChadScanner Settings")
             .with_inner_size([720.0, 640.0])
             .with_icon(window_icon()),
         ..Default::default()
     };
-    eframe::run_native("ChadOverlay Settings", options, Box::new(|_cc| Ok(Box::new(SettingsApp::new(paths)))))
+    eframe::run_native("ChadScanner Settings", options, Box::new(|_cc| Ok(Box::new(SettingsApp::new(paths)))))
         .map_err(|e| anyhow::anyhow!("{e}"))
 }

@@ -38,7 +38,7 @@ Barters 3 · Crafts 5
 1. Build and publish from WSL (see below), or copy a published folder to `C:\ChadScanner`.
 2. Set EFT to **Borderless** (Settings → Graphics → Screen mode). Exclusive fullscreen is not supported:
    the card is a normal topmost window and cannot be drawn over an exclusive-fullscreen game.
-3. Run `C:\ChadScanner\chadoverlay.exe`. It sits in the tray; right-click for **Settings**,
+3. Run `C:\ChadScanner\chadscanner.exe`. It sits in the tray; right-click for **Settings**,
    **Pause scanning** and **Quit**.
 
 ## Settings
@@ -56,7 +56,7 @@ Changes are saved and applied immediately. The game mode switches by itself when
 
 ## Progress
 
-- **On this PC** – `%APPDATA%\ChadOverlay\progress.json` in TarkovTracker backup format, so it can be
+- **On this PC** – `%APPDATA%\ChadScanner\progress.json` in TarkovTracker backup format, so it can be
   imported at tarkovtracker.org. Tasks you finish are filled in from EFT's logs, including ones finished
   while the app was closed. EFT does not log hideout upgrades: set them on the Hideout page.
 - **TarkovTracker.org** – reads `GET /progress` (every 5 min, and on a scan when older than 60 s; within the
@@ -66,7 +66,7 @@ Changes are saved and applied immediately. The game mode switches by itself when
 ## Debug report
 
 Press **Ctrl + Shift + F12** right after a scan that went wrong. It saves
-`%APPDATA%\ChadOverlay\reports\report-<time>\` with the scan's screenshot, the candidates with scores and
+`%APPDATA%\ChadScanner\reports\report-<time>\` with the scan's screenshot, the candidates with scores and
 why the scan was accepted or rejected (`report.json`), the screen at that moment and the log tail.
 
 ## Build (WSL / Linux)
@@ -89,8 +89,8 @@ layout) on Linux.
 
 | Where | What |
 |---|---|
-| `C:\ChadScanner\` | `chadoverlay.exe`, `onnxruntime.dll`, `data\` (models, index, item images) |
-| `%APPDATA%\ChadOverlay\` | `config.json`, `progress.json`, `pending.json` (TarkovTracker writes waiting for retry), `logstate.json` (EFT log read position), `cache\` (tarkov.dev data), `reports\`, `log.txt` |
+| `C:\ChadScanner\` | `chadscanner.exe`, `onnxruntime.dll`, `data\` (models, index, item images) |
+| `%APPDATA%\ChadScanner\` | `config.json`, `progress.json`, `pending.json` (TarkovTracker writes waiting for retry), `logstate.json` (EFT log read position), `cache\` (tarkov.dev data), `reports\`, `log.txt` |
 
 ## Data sources
 

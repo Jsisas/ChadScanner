@@ -1,7 +1,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 // Off Windows only the portable modules build (for tests); their consumers are Windows-only.
 #![cfg_attr(not(windows), allow(dead_code))]
-//! ChadOverlay: item info for Escape from Tarkov as a floating tooltip.
+//! ChadScanner: item info for Escape from Tarkov as a floating tooltip.
 
 mod card;
 mod config;
@@ -20,7 +20,7 @@ mod win;
 
 #[cfg(not(windows))]
 fn main() {
-    eprintln!("ChadOverlay runs on Windows only.");
+    eprintln!("ChadScanner runs on Windows only.");
     std::process::exit(1);
 }
 
@@ -60,10 +60,10 @@ fn run() -> anyhow::Result<()> {
         return settings::run(paths);
     }
     if !single_instance() {
-        log::warn!("ChadOverlay is already running");
+        log::warn!("ChadScanner is already running");
         return Ok(());
     }
-    log::info!("ChadOverlay {} starting; data {}", env!("CARGO_PKG_VERSION"), paths.data.display());
+    log::info!("ChadScanner {} starting; data {}", env!("CARGO_PKG_VERSION"), paths.data.display());
 
     let font = load_fonts()?;
     let cfg = config::Config::load(&paths.config());
@@ -109,7 +109,7 @@ fn single_instance() -> bool {
     use windows::Win32::System::Threading::CreateMutexW;
     unsafe {
         // Leaked on purpose: held for the life of the process.
-        let _ = CreateMutexW(None, true, w!("Local\\ChadOverlay"));
+        let _ = CreateMutexW(None, true, w!("Local\\ChadScanner"));
         GetLastError() != ERROR_ALREADY_EXISTS
     }
 }

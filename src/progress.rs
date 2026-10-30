@@ -105,7 +105,7 @@ fn empty_doc(mode: Mode) -> Value {
         "_format": FORMAT,
         "_version": 2,
         "exportedAt": now_ms(),
-        "appVersion": "ChadOverlay 0.1",
+        "appVersion": "ChadScanner 0.1",
         "currentGameMode": mode.key(),
         "gameEdition": 1,
         "tarkovUid": null,
@@ -352,7 +352,7 @@ pub fn tracker_agent() -> anyhow::Result<ureq::Agent> {
     Ok(ureq::AgentBuilder::new()
         .tls_connector(Arc::new(native_tls::TlsConnector::new()?))
         .timeout(Duration::from_secs(20))
-        .user_agent("ChadOverlay/0.1 (+https://github.com/Jsisas/ChadScanner)")
+        .user_agent("ChadScanner/0.1 (+https://github.com/Jsisas/ChadScanner)")
         .build())
 }
 
@@ -641,7 +641,7 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("chadoverlay-test-{}-{name}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("chadscanner-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d.join("progress.json")
