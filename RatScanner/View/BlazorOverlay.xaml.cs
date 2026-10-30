@@ -14,6 +14,7 @@ namespace RatScanner.View;
 /// </summary>
 public partial class BlazorOverlay : Window {
 	private bool _shown;
+	private int _version;
 
 	public BlazorOverlay(ServiceProvider serviceProvider) {
 		Resources.Add("services", serviceProvider);
@@ -21,16 +22,30 @@ public partial class BlazorOverlay : Window {
 		InitializeComponent();
 	}
 
-	internal void SetVisible(bool visible) {
-		if (_shown == visible) return;
-		_shown = visible;
-
+	internal async void SetVisible(bool visible) {
+		var version = ++_version;
 		if (visible) {
+			if (_shown) return;
+			_shown = true;
 			SetSize();
 			Show();
-		} else {
-			Hide();
+			return;
 		}
+		if (!_shown) return;
+		// A hidden WebView2 stops compositing and re-presents its last frame when shown again,
+		// so only hide once the empty overlay has actually been painted (two animation frames).
+		try {
+			var webView = blazorOverlayWebView.WebView;
+			if (webView.CoreWebView2 != null) {
+				_ = await webView.ExecuteScriptAsync(
+					"new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(0))))");
+			}
+		} catch (System.Exception e) when (e is System.InvalidOperationException or COMException) {
+			// WebView torn down at exit: hide anyway.
+		}
+		if (version != _version) return; // a newer show/hide arrived while waiting
+		_shown = false;
+		Hide();
 	}
 	private void BlazorOverlay_Loaded(object? sender, RoutedEventArgs e) {
 		blazorOverlayWebView.WebView.DefaultBackgroundColor = System.Drawing.Color.Transparent;
