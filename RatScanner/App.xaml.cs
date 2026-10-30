@@ -35,6 +35,11 @@ public partial class App : Application, ISingleInstance {
 		// Set current working directory to executable location
 		Directory.SetCurrentDirectory(AppDomain.CurrentDomain.BaseDirectory);
 
+		// WebView2 paints white until a page sets its own background. The overlay's WebView2 is only
+		// created on the first scan, so that white frame covered the whole screen. Every WebView here
+		// sets DefaultBackgroundColor = Transparent anyway, just too late to avoid that first frame.
+		Environment.SetEnvironmentVariable("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "00000000");
+
 		// Always registered (not only in Release) so IDE0051 cannot treat the
 		// method as unused and delete it, which would break Release builds.
 		SetupExceptionHandling();
