@@ -1,7 +1,7 @@
-# Builds the tarkov-vision native library and stages its data for RatScanner.
-# Run from the repository root: powershell -File tools\build-tv.ps1 [-TvRepo ..\tarkov-vision]
+# Builds the ChadVision native library and stages its data for RatScanner.
+# Run from the repository root: powershell -File tools\build-chadvision.ps1 [-ChadVisionRepo ..\ChadVision]
 param(
-	[string]$TvRepo = "..\tarkov-vision"
+	[string]$ChadVisionRepo = "..\ChadVision"
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,11 +12,11 @@ function Invoke-Checked([scriptblock]$Command) {
 }
 
 $RepoRoot = (Get-Location).Path
-$TvRepo = (Resolve-Path $TvRepo).Path
+$ChadVisionRepo = (Resolve-Path $ChadVisionRepo).Path
 $NativeDir = Join-Path $RepoRoot "RatScanner\Native"
-$DataDir = Join-Path $RepoRoot "RatScanner\Data\tv"
+$DataDir = Join-Path $RepoRoot "RatScanner\Data\chadvision"
 
-Push-Location $TvRepo
+Push-Location $ChadVisionRepo
 try {
 	Write-Host "Building tv library..."
 	Invoke-Checked { cargo build --release --lib }
@@ -35,7 +35,7 @@ try {
 	}
 
 	New-Item -ItemType Directory -Force $NativeDir | Out-Null
-	Copy-Item "target\release\tv.dll" $NativeDir -Force
+	Copy-Item "target\release\chadvision.dll" $NativeDir -Force
 	Get-ChildItem "target\release" -Filter "onnxruntime*.dll" -ErrorAction SilentlyContinue |
 		Copy-Item -Destination $NativeDir -Force
 
@@ -50,4 +50,4 @@ finally {
 	Pop-Location
 }
 
-Write-Host "tarkov-vision ready: $NativeDir, $DataDir"
+Write-Host "ChadVision ready: $NativeDir, $DataDir"

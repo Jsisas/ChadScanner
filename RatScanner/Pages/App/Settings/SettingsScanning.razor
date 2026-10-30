@@ -67,10 +67,10 @@
                        Color="Color.Primary" Dense="true" />
         </SettingsRow>
 
-        <SettingsRow Label="@Localizer["UseTarkovVision"]" SubLabel="@Localizer["UseTarkovVisionHint"]"
+        <SettingsRow Label="@Localizer["UseChadVision"]" SubLabel="@Localizer["UseChadVisionHint"]"
                      Disabled="@(!SettingsVM.EnableIconScan)">
-            <MudSwitch T="bool" Checked="@SettingsVM.IsIconScanUseTarkovVision"
-                       CheckedChanged="@((bool v) => { SettingsVM.IsIconScanUseTarkovVision = v; SettingsVM.MarkDirty(); })"
+            <MudSwitch T="bool" Checked="@SettingsVM.IsIconScanUseChadVision"
+                       CheckedChanged="@((bool v) => { SettingsVM.IsIconScanUseChadVision = v; SettingsVM.MarkDirty(); })"
                        Color="Color.Primary" Dense="true" />
         </SettingsRow>
     </SettingsCard>

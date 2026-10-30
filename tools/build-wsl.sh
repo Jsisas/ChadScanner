@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Builds RatScanner for Windows from WSL2/Linux, including tarkov-vision (tv.dll) and its data.
+# Builds RatScanner for Windows from WSL2/Linux, including ChadVision (chadvision.dll) and its data.
 # Rerun-safe: every step skips or overwrites; config.cfg and UserData/ in the output folder are kept.
 #
-# Usage: tools/build-wsl.sh [--out DIR] [--tv DIR] [--refresh-refs]
+# Usage: tools/build-wsl.sh [--out DIR] [--chadvision DIR] [--refresh-refs]
 #   --out           publish folder (default /mnt/c/RatScanner, i.e. C:\RatScanner)
-#   --tv            tarkov-vision repo (default ../tarkov-vision next to this repo)
+#   --chadvision    ChadVision repo (default ../ChadVision next to this repo)
 #   --refresh-refs  re-download item icons from tarkov.dev (after a wipe/patch) and rebuild the index
 set -euo pipefail
 
 RS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TV="$RS/../tarkov-vision"
+CV="$RS/../ChadVision"
 OUT="/mnt/c/RatScanner"
 REFRESH=0
 TARGET=x86_64-pc-windows-msvc
@@ -17,7 +17,7 @@ TARGET=x86_64-pc-windows-msvc
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--out) OUT="$2"; shift 2 ;;
-		--tv) TV="$2"; shift 2 ;;
+		--chadvision) CV="$2"; shift 2 ;;
 		--refresh-refs) REFRESH=1; shift ;;
 		-h|--help) sed -n '2,9p' "$0"; exit 0 ;;
 		*) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -37,17 +37,17 @@ need lld-link "sudo apt install lld"
 need llvm-lib "sudo apt install llvm"
 rustup target list --installed | grep -qx "$TARGET" || rustup target add "$TARGET"
 command -v cargo-xwin >/dev/null || cargo install --locked cargo-xwin
-[[ -f "$TV/Cargo.toml" ]] || die "tarkov-vision not found at $TV (clone git@github.com:Jsisas/ChadVision.git there or pass --tv)"
-TV="$(cd "$TV" && pwd)"
+[[ -f "$CV/Cargo.toml" ]] || die "ChadVision not found at $CV (clone git@github.com:Jsisas/ChadVision.git there or pass --chadvision)"
+CV="$(cd "$CV" && pwd)"
 [[ -f "$RS/RatEye/RatEye/RatEye.csproj" ]] || (cd "$RS" && git submodule update --init --recursive)
 
-step "Building tv.dll ($TARGET)"
-(cd "$TV" && cargo xwin build --release --lib --target "$TARGET")
-DLL_DIR="$TV/target/$TARGET/release"
-[[ -f "$DLL_DIR/tv.dll" ]] || die "tv.dll was not produced in $DLL_DIR"
+step "Building chadvision.dll ($TARGET)"
+(cd "$CV" && cargo xwin build --release --lib --target "$TARGET")
+DLL_DIR="$CV/target/$TARGET/release"
+[[ -f "$DLL_DIR/chadvision.dll" ]] || die "chadvision.dll was not produced in $DLL_DIR"
 
-step "Preparing tarkov-vision data"
-cd "$TV"
+step "Preparing ChadVision data"
+cd "$CV"
 if [[ $REFRESH -eq 1 || ! -f data/refs/catalog.json ]]; then
 	cargo run --release -- fetch-refs --out data/refs
 	rm -rf data/index
@@ -57,12 +57,12 @@ fi
 # The bench run builds data/index as a side effect; it is reused when the catalog is unchanged.
 [[ -f data/index/embed_ids.txt ]] || cargo run --release -- bench --set data/real --methods fusion --out /tmp/tv-index-bench.md
 
-step "Staging tv.dll and data into RatScanner"
+step "Staging chadvision.dll and data into RatScanner"
 NATIVE="$RS/RatScanner/Native"
 DATA="$RS/RatScanner/Data/tv"
 mkdir -p "$NATIVE"
 rm -f "$NATIVE"/*.dll
-cp "$DLL_DIR/tv.dll" "$NATIVE/"
+cp "$DLL_DIR/chadvision.dll" "$NATIVE/"
 find "$DLL_DIR" -maxdepth 1 -name 'onnxruntime*.dll' -exec cp {} "$NATIVE/" \;
 # Mirror (not merge) so icons removed upstream do not linger.
 rm -rf "$DATA"
@@ -79,7 +79,7 @@ mkdir -p "$OUT"
 cd "$RS"
 dotnet publish RatScanner/RatScanner.csproj -c Release -r win-x64 --self-contained \
 	-p:EnableWindowsTargeting=true -o "$OUT"
-[[ -f "$OUT/tv.dll" ]] || die "tv.dll missing from $OUT"
+[[ -f "$OUT/chadvision.dll" ]] || die "chadvision.dll missing from $OUT"
 
 step "Done"
 echo "Run on Windows: $(wslpath -w "$OUT" 2>/dev/null || echo "$OUT")\\RatScanner.exe"

@@ -78,7 +78,7 @@ internal static partial class RatConfig {
 		internal static int ScanHeight => (int)(GameScale * 896);
 		internal static Hotkey Hotkey = new([Key.LeftShift], [MouseButton.Left]);
 		internal static bool UseCachedIcons = true;
-		internal static bool UseTarkovVision = true;
+		internal static bool UseChadVision = true;
 	}
 
 	// ToolTip options
@@ -283,7 +283,7 @@ internal static partial class RatConfig {
 		IconScan.ScanRotatedIcons = config.ReadBool(nameof(IconScan.ScanRotatedIcons), IconScan.ScanRotatedIcons);
 		IconScan.Hotkey = config.ReadHotkey(nameof(IconScan.Hotkey), IconScan.Hotkey);
 		IconScan.UseCachedIcons = config.ReadBool(nameof(IconScan.UseCachedIcons), IconScan.UseCachedIcons);
-		IconScan.UseTarkovVision = config.ReadBool(nameof(IconScan.UseTarkovVision), IconScan.UseTarkovVision);
+		IconScan.UseChadVision = config.ReadBool(nameof(IconScan.UseChadVision), IconScan.UseChadVision);
 
 		config.Section = nameof(ToolTip);
 		ToolTip.Duration = config.ReadInt(nameof(ToolTip.Duration), ToolTip.Duration);
@@ -392,7 +392,7 @@ internal static partial class RatConfig {
 		config.WriteBool(nameof(IconScan.ScanRotatedIcons), IconScan.ScanRotatedIcons);
 		config.WriteHotkey(nameof(IconScan.Hotkey), IconScan.Hotkey);
 		config.WriteBool(nameof(IconScan.UseCachedIcons), IconScan.UseCachedIcons);
-		config.WriteBool(nameof(IconScan.UseTarkovVision), IconScan.UseTarkovVision);
+		config.WriteBool(nameof(IconScan.UseChadVision), IconScan.UseChadVision);
 
 		config.Section = nameof(ToolTip);
 		config.WriteInt(nameof(ToolTip.Duration), ToolTip.Duration);

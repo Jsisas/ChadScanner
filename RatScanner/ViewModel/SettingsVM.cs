@@ -52,7 +52,7 @@ internal class SettingsVM : INotifyPropertyChanged {
 	public bool EnableIconScan { get; set; }
 	public bool ScanRotatedIcons { get; set; }
 	public bool UseCachedIcons { get; set; }
-	public bool IsIconScanUseTarkovVision { get; set; }
+	public bool IsIconScanUseChadVision { get; set; }
 	public Hotkey IconScanHotkey { get; set; }
 
 	public int ToolTipMilli { get; set; }
@@ -156,7 +156,7 @@ internal class SettingsVM : INotifyPropertyChanged {
 		EnableIconScan = RatConfig.IconScan.Enable;
 		ScanRotatedIcons = RatConfig.IconScan.ScanRotatedIcons;
 		UseCachedIcons = RatConfig.IconScan.UseCachedIcons;
-		IsIconScanUseTarkovVision = RatConfig.IconScan.UseTarkovVision;
+		IsIconScanUseChadVision = RatConfig.IconScan.UseChadVision;
 		IconScanHotkey = new Hotkey(RatConfig.IconScan.Hotkey);
 
 		ToolTipMilli = RatConfig.ToolTip.Duration;
@@ -351,7 +351,7 @@ internal class SettingsVM : INotifyPropertyChanged {
 		RatConfig.IconScan.Enable = EnableIconScan;
 		RatConfig.IconScan.ScanRotatedIcons = ScanRotatedIcons;
 		RatConfig.IconScan.UseCachedIcons = UseCachedIcons;
-		RatConfig.IconScan.UseTarkovVision = IsIconScanUseTarkovVision;
+		RatConfig.IconScan.UseChadVision = IsIconScanUseChadVision;
 		RatConfig.IconScan.Hotkey = IconScanHotkey;
 
 		RatConfig.ToolTip.Duration = ToolTipMilli;

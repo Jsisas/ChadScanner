@@ -4,9 +4,9 @@
 echo Removing old publish folder...
 rmdir /s /q publish
 
-:: Build native tarkov-vision library and data
-echo Building tarkov-vision...
-powershell -ExecutionPolicy Bypass -File tools\build-tv.ps1
+:: Build native ChadVision library and data
+echo Building ChadVision...
+powershell -ExecutionPolicy Bypass -File tools\build-chadvision.ps1
 if %ERRORLEVEL% neq 0 exit /b 1
 
 :: Publish

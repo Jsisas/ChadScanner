@@ -59,7 +59,7 @@ public class RatScannerMain : INotifyPropertyChanged {
 	public LocalProgressStore LocalProgress;
 
 	internal RatEyeEngine RatEyeEngine;
-	internal TarkovVision? Vision;
+	internal ChadVision? Vision;
 
 	public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -165,8 +165,8 @@ public class RatScannerMain : INotifyPropertyChanged {
 		Logger.LogInfo("Initializing RatEye...");
 		SetupRatEye();
 
-		Logger.LogInfo("Initializing tarkov-vision...");
-		Vision = TarkovVision.TryOpen(Path.Combine(RatConfig.Paths.Data, "tv"));
+		Logger.LogInfo("Initializing ChadVision...");
+		Vision = ChadVision.TryOpen(Path.Combine(RatConfig.Paths.Data, "chadvision"));
 
 		new Thread(() => {
 			Thread.Sleep(1000);
@@ -520,7 +520,7 @@ public class RatScannerMain : INotifyPropertyChanged {
 			toolTipPosition += icon.Position + icon.ItemPosition;
 			toolTipPosition -= new Vector2(RatConfig.IconScan.ScanWidth, RatConfig.IconScan.ScanHeight) / 2;
 
-			ItemIconScan? visionScan = RatConfig.IconScan.UseTarkovVision ? IdentifyWithVision(screenshot, icon, toolTipPosition) : null;
+			ItemIconScan? visionScan = RatConfig.IconScan.UseChadVision ? IdentifyWithVision(screenshot, icon, toolTipPosition) : null;
 			ItemIconScan tempIconScan = visionScan ?? new(icon, toolTipPosition, RatConfig.ToolTip.Duration);
 
 			ItemScans.Enqueue(tempIconScan);
@@ -529,15 +529,15 @@ public class RatScannerMain : INotifyPropertyChanged {
 	}
 
 	/// <summary>
-	/// Re-identifies the icon RatEye located using tarkov-vision.
+	/// Re-identifies the icon RatEye located using ChadVision.
 	/// </summary>
-	/// <returns>The scan, or <see langword="null"/> when tarkov-vision is unavailable or has no known match</returns>
+	/// <returns>The scan, or <see langword="null"/> when ChadVision is unavailable or has no known match</returns>
 	private ItemIconScan? IdentifyWithVision(Bitmap screenshot, RatEye.Processing.Icon icon, Vector2 toolTipPosition) {
 		var vision = Vision;
 		if (vision == null) return null;
 
 		try {
-			// Same padding rule as tarkov-vision's dataset::padded_crop
+			// Same padding rule as ChadVision's dataset::padded_crop
 			var pitch = 63f * RatEyeEngine.Config.ProcessingConfig.Scale;
 			var slotsW = Math.Max(1, (int)Math.Round(icon.Size.X / pitch));
 			var slotsH = Math.Max(1, (int)Math.Round(icon.Size.Y / pitch));
@@ -559,7 +559,7 @@ public class RatScannerMain : INotifyPropertyChanged {
 
 			return new ItemIconScan(icon, item, score, toolTipPosition, RatConfig.ToolTip.Duration);
 		} catch (Exception e) {
-			Logger.LogWarning("tarkov-vision scan failed, falling back to RatEye", e);
+			Logger.LogWarning("ChadVision scan failed, falling back to RatEye", e);
 			return null;
 		}
 	}
