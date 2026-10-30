@@ -9,7 +9,9 @@
 
 <div
     style="transform-origin: top left; transform: scale(@((1f / SettingsVM.ScreenScale).ToString(CultureInfo.InvariantCulture)));">
-    @foreach (var itemScan in MenuVM.ItemScans) {
+    @* Only the newest scan: older ones still inside their display time would otherwise
+       flash at their old position and size next to the new box. *@
+    @foreach (var itemScan in MenuVM.ItemScans.TakeLast(1)) {
         var item = itemScan.Item;
         @if (itemScan != null
        && itemScan.GetToolTipPosition() != null
