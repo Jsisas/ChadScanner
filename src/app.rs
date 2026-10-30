@@ -17,6 +17,8 @@ const ACCEPT: f32 = 0.55;
 /// …and beat the runner-up by this much.
 const MARGIN: f32 = 0.02;
 const REJECT_SECONDS: f32 = 1.5;
+/// Wait before the second look at an uncertain scan.
+const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// What a scan saw and decided; saved by the debug report.
 struct LastScan {
@@ -212,12 +214,31 @@ impl App {
             self.show_card(&card::message("?", "no item data yet", card::GREY), at, Some(REJECT_SECONDS));
             return Ok((None, Vec::new(), "rejected: no item data yet".into()));
         };
-        let shot = win::capture::around(req.x, req.y)?;
-        let cands = engine.identify_at(&shot.image, shot.mouse, shot.scale, 5);
+        // The runner-up must be a different-looking item: two items can share icon and short
+        // name (Secure / Encrypted flash drive) and then always tie.
+        let decide = |cands: &[(String, f32)]| {
+            let top = cands.first().map_or(0.0, |c| c.1);
+            let name = |id: &str| cat.items.get(id).map(|i| i.short_name.clone());
+            let top_name = cands.first().and_then(|c| name(&c.0));
+            let second = cands.iter().skip(1).find(|c| name(&c.0) != top_name).map_or(0.0, |c| c.1);
+            (top, second, top >= ACCEPT && top - second >= MARGIN)
+        };
+        let mut shot = win::capture::around(req.x, req.y)?;
+        let mut cands = engine.identify_at(&shot.image, shot.mouse, shot.scale, 5);
         log::info!("candidates: {:?}", cands.iter().take(3).collect::<Vec<_>>());
-        let top = cands.first().map_or(0.0, |c| c.1);
-        let second = cands.get(1).map_or(0.0, |c| c.1);
-        let item = cands.first().filter(|_| top >= ACCEPT && top - second >= MARGIN).and_then(|(id, _)| cat.items.get(id));
+        if !decide(&cands).2 {
+            // EFT draws its hover tooltip (the item's full name) a moment after the cursor stops;
+            // one more look with the name visible settles most uncertain scans.
+            std::thread::sleep(RETRY_DELAY);
+            let (cx, cy) = win::cursor_pos();
+            if (cx - req.x).abs() <= 8 && (cy - req.y).abs() <= 8 {
+                shot = win::capture::around(req.x, req.y)?;
+                cands = engine.identify_at(&shot.image, shot.mouse, shot.scale, 5);
+                log::info!("retry candidates: {:?}", cands.iter().take(3).collect::<Vec<_>>());
+            }
+        }
+        let (top, second, accepted) = decide(&cands);
+        let item = cands.first().filter(|_| accepted).and_then(|(id, _)| cat.items.get(id));
         let Some(item) = item else {
             self.show_card(&card::message("?", "no confident match", card::GREY), at, Some(REJECT_SECONDS));
             let why = match cands.first() {
