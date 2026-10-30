@@ -12,7 +12,6 @@
         ShowInTaskbar="False"
         Topmost="True"
         ResizeMode="NoResize"
-        SizeToContent="WidthAndHeight"
         AllowsTransparency="True"
         Opacity="0.85"
         Background="Black">

@@ -132,11 +132,13 @@ public partial class FloatingTooltip : Window {
 			}
 		}
 
-		// Width/Height are NaN before the first layout and the previous item's size afterwards
-		// (SizeToContent), so measure the new content before placing the window.
+		// Size the window from the measured content before Show(): with SizeToContent the window
+		// opened at its last (emptied) size and grew a layout pass later, visibly jumping.
 		var content = (FrameworkElement)Content;
 		content.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-		var size = content.DesiredSize;
+		var size = new Size(Math.Ceiling(content.DesiredSize.Width), Math.Ceiling(content.DesiredSize.Height));
+		Width = size.Width;
+		Height = size.Height;
 
 		// Mouse and screen size are physical pixels; Left/Top are DIPs.
 		var dpi = RatConfig.ScreenScale > 0 ? RatConfig.ScreenScale : 1f;
