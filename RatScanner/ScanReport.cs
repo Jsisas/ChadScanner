@@ -36,6 +36,8 @@ internal sealed class ScanReport {
 	public string? RatEyeItemId { get; set; }
 	public string? RatEyeItemShortName { get; set; }
 
+	/// <summary>"grid" when ChadVision found the cell from the stash grid lines, else RatEye's box was used.</summary>
+	public string? CellSource { get; set; }
 	/// <summary>x,y,w,h inside the screenshot.</summary>
 	public string? CropRect { get; set; }
 	public string? Slots { get; set; }

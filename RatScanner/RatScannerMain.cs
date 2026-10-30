@@ -563,15 +563,25 @@ public class RatScannerMain : INotifyPropertyChanged {
 
 		try {
 			// Same padding rule as ChadVision's dataset::padded_crop
-			var pitch = 63f * RatEyeEngine.Config.ProcessingConfig.Scale;
-			var slotsW = Math.Max(1, (int)Math.Round(icon.Size.X / pitch));
-			var slotsH = Math.Max(1, (int)Math.Round(icon.Size.Y / pitch));
+			var scale = RatEyeEngine.Config.ProcessingConfig.Scale;
+			var pitch = 63f * scale;
+			var hintW = Math.Max(1, (int)Math.Round(icon.Size.X / pitch));
+			var hintH = Math.Max(1, (int)Math.Round(icon.Size.Y / pitch));
+
+			// RatEye's box can be off by a large part of a slot; the grid lines around the mouse are exact.
+			// The screenshot is centred on the mouse.
+			var mouse = new System.Drawing.Point(RatConfig.IconScan.ScanWidth / 2, RatConfig.IconScan.ScanHeight / 2);
+			var cell = ChadVision.LocateCell(screenshot, mouse, scale, hintW, hintH);
+			var rect = cell?.Rect ?? new Rectangle(icon.Position.X, icon.Position.Y, icon.Size.X, icon.Size.Y);
+			var slotsW = cell?.SlotW ?? hintW;
+			var slotsH = cell?.SlotH ?? hintH;
+			report.CellSource = cell != null ? "grid" : "RatEye box (no grid found)";
 
 			var pad = (int)Math.Round(pitch / 8f);
-			var x0 = Math.Max(0, icon.Position.X - pad);
-			var y0 = Math.Max(0, icon.Position.Y - pad);
-			var x1 = Math.Min(screenshot.Width, icon.Position.X + icon.Size.X + pad);
-			var y1 = Math.Min(screenshot.Height, icon.Position.Y + icon.Size.Y + pad);
+			var x0 = Math.Max(0, rect.X - pad);
+			var y0 = Math.Max(0, rect.Y - pad);
+			var x1 = Math.Min(screenshot.Width, rect.Right + pad);
+			var y1 = Math.Min(screenshot.Height, rect.Bottom + pad);
 			report.CropRect = $"{x0},{y0},{x1 - x0},{y1 - y0}";
 			report.Slots = $"{slotsW}x{slotsH}";
 			if (x1 <= x0 || y1 <= y0) {

@@ -33,6 +33,17 @@ internal sealed partial class ChadVision : IDisposable {
 	[LibraryImport("chadvision", EntryPoint = "cv_last_error")]
 	private static unsafe partial uint CvLastError(byte* buffer, uint cap);
 
+	// Must match the Rust `CvCell`.
+	[StructLayout(LayoutKind.Sequential)]
+	private struct CvCell {
+		public int X, Y, W, H;
+		public uint SlotW, SlotH;
+	}
+
+	[LibraryImport("chadvision", EntryPoint = "cv_locate_cell")]
+	private static unsafe partial int CvLocateCell(byte* bgr, uint width, uint height, uint stride, int mouseX, int mouseY, float scale,
+		uint hintSlotW, uint hintSlotH, CvCell* output);
+
 	private readonly object _lock = new();
 	private IntPtr _engine;
 
@@ -94,6 +105,29 @@ internal sealed partial class ChadVision : IDisposable {
 			}
 		}
 		return result;
+	}
+
+	/// <summary>
+	/// Finds the item cell under <paramref name="mouse"/> from the stash grid lines in
+	/// <paramref name="screenshot"/>. Hint slots fill in a side whose far edge is not visible.
+	/// </summary>
+	/// <returns>Cell rectangle in screenshot pixels and its size in slots, or <see langword="null"/> when no grid is visible there</returns>
+	internal static unsafe (Rectangle Rect, int SlotW, int SlotH)? LocateCell(Bitmap screenshot, Point mouse, float scale, int hintSlotW, int hintSlotH) {
+		CvCell cell;
+		int found;
+		var data = screenshot.LockBits(new Rectangle(0, 0, screenshot.Width, screenshot.Height), ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+		try {
+			found = CvLocateCell((byte*)data.Scan0, (uint)data.Width, (uint)data.Height, (uint)data.Stride, mouse.X, mouse.Y, scale,
+				(uint)Math.Max(1, hintSlotW), (uint)Math.Max(1, hintSlotH), &cell);
+		} finally {
+			screenshot.UnlockBits(data);
+		}
+
+		if (found < 0) {
+			Logger.LogWarning("ChadVision locate failed: " + GetLastError());
+			return null;
+		}
+		return found == 0 ? null : (new Rectangle(cell.X, cell.Y, cell.W, cell.H), (int)cell.SlotW, (int)cell.SlotH);
 	}
 
 	private static unsafe string GetLastError() {
