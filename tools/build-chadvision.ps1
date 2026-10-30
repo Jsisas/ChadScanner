@@ -18,8 +18,23 @@ $DataDir = Join-Path $RepoRoot "RatScanner\Data\chadvision"
 
 Push-Location $ChadVisionRepo
 try {
-	Write-Host "Building tv library..."
+	Write-Host "Building chadvision library..."
 	Invoke-Checked { cargo build --release --lib }
+
+	# Windows builds load ONNX Runtime dynamically; the version must match ort-sys (1.22.x).
+	$OrtVer = "1.22.0"
+	$OrtDll = "data\ort-win-x64-$OrtVer\onnxruntime.dll"
+	if (-not (Test-Path $OrtDll)) {
+		Write-Host "Downloading ONNX Runtime $OrtVer..."
+		$Zip = Join-Path $env:TEMP "onnxruntime-$OrtVer.zip"
+		Invoke-WebRequest "https://github.com/microsoft/onnxruntime/releases/download/v$OrtVer/onnxruntime-win-x64-$OrtVer.zip" -OutFile $Zip
+		$Unzipped = Join-Path $env:TEMP "onnxruntime-$OrtVer"
+		Expand-Archive $Zip $Unzipped -Force
+		New-Item -ItemType Directory -Force (Split-Path $OrtDll) | Out-Null
+		Copy-Item (Join-Path $Unzipped "onnxruntime-win-x64-$OrtVer\lib\onnxruntime.dll") $OrtDll -Force
+	}
+	# The tv CLI runs below must not pick up an older onnxruntime.dll from System32.
+	$env:ORT_DYLIB_PATH = (Resolve-Path $OrtDll).Path
 
 	if (-not (Test-Path "data\refs\catalog.json")) {
 		Write-Host "Fetching reference icons..."
@@ -36,8 +51,7 @@ try {
 
 	New-Item -ItemType Directory -Force $NativeDir | Out-Null
 	Copy-Item "target\release\chadvision.dll" $NativeDir -Force
-	Get-ChildItem "target\release" -Filter "onnxruntime*.dll" -ErrorAction SilentlyContinue |
-		Copy-Item -Destination $NativeDir -Force
+	Copy-Item $OrtDll $NativeDir -Force
 
 	Write-Host "Copying data to $DataDir..."
 	New-Item -ItemType Directory -Force (Join-Path $DataDir "refs") | Out-Null

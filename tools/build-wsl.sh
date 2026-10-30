@@ -33,6 +33,8 @@ need cargo "Install Rust: https://rustup.rs"
 need rustup "Install Rust via rustup (https://rustup.rs); distro cargo cannot add the Windows target"
 need dotnet "Install the .NET 10 SDK: https://learn.microsoft.com/dotnet/core/install/linux-ubuntu"
 need clang "sudo apt install clang lld llvm"
+need curl "sudo apt install curl"
+need unzip "sudo apt install unzip"
 need lld-link "sudo apt install lld"
 need llvm-lib "sudo apt install llvm"
 rustup target list --installed | grep -qx "$TARGET" || rustup target add "$TARGET"
@@ -57,13 +59,23 @@ fi
 # The bench run builds data/index as a side effect; it is reused when the catalog is unchanged.
 [[ -f data/index/embed_ids.txt ]] || cargo run --release -- bench --set data/real --methods fusion --out /tmp/tv-index-bench.md
 
+# Windows build loads ONNX Runtime dynamically; the version must match ort-sys (1.22.x).
+ORT_VER=1.22.0
+ORT_DLL="data/ort-win-x64-$ORT_VER/onnxruntime.dll"
+if [[ ! -f "$ORT_DLL" ]]; then
+	tmp="$(mktemp -d)"
+	curl -fsSL -o "$tmp/ort.zip" "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VER/onnxruntime-win-x64-$ORT_VER.zip"
+	unzip -q -j "$tmp/ort.zip" "onnxruntime-win-x64-$ORT_VER/lib/onnxruntime.dll" -d "$tmp"
+	mkdir -p "$(dirname "$ORT_DLL")" && mv "$tmp/onnxruntime.dll" "$ORT_DLL"
+	rm -rf "$tmp"
+fi
+
 step "Staging chadvision.dll and data into RatScanner"
 NATIVE="$RS/RatScanner/Native"
-DATA="$RS/RatScanner/Data/tv"
+DATA="$RS/RatScanner/Data/chadvision"
 mkdir -p "$NATIVE"
 rm -f "$NATIVE"/*.dll
-cp "$DLL_DIR/chadvision.dll" "$NATIVE/"
-find "$DLL_DIR" -maxdepth 1 -name 'onnxruntime*.dll' -exec cp {} "$NATIVE/" \;
+cp "$DLL_DIR/chadvision.dll" "$ORT_DLL" "$NATIVE/"
 # Mirror (not merge) so icons removed upstream do not linger.
 rm -rf "$DATA"
 mkdir -p "$DATA/refs"
