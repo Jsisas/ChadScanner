@@ -52,12 +52,15 @@ internal sealed class ScanReport {
 
 	[JsonIgnore] public Bitmap? Screenshot { get; set; }
 	[JsonIgnore] public Bitmap? Crop { get; set; }
+	/// <summary>Capture right of the cursor where EFT draws its hover tooltip, read for the item name.</summary>
+	[JsonIgnore] public Bitmap? TooltipShot { get; set; }
 
 	/// <summary>Replaces the remembered scan; the previous one's bitmaps are released.</summary>
 	internal static void Publish(ScanReport report) {
 		lock (Gate) {
 			_last?.Screenshot?.Dispose();
 			_last?.Crop?.Dispose();
+			_last?.TooltipShot?.Dispose();
 			_last = report;
 		}
 	}
@@ -72,6 +75,7 @@ internal sealed class ScanReport {
 
 			_last.Screenshot?.Save(Path.Combine(dir, "screenshot.png"), ImageFormat.Png);
 			_last.Crop?.Save(Path.Combine(dir, "crop.png"), ImageFormat.Png);
+			_last.TooltipShot?.Save(Path.Combine(dir, "tooltip.png"), ImageFormat.Png);
 			File.WriteAllText(Path.Combine(dir, "report.json"), JsonConvert.SerializeObject(_last, Formatting.Indented));
 			SaveScreen(Path.Combine(dir, "screen-at-report.png"));
 			SaveLogTail(Path.Combine(dir, "log-tail.txt"));

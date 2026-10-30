@@ -509,14 +509,22 @@ public class RatScannerMain : INotifyPropertyChanged {
 			Vector2 screenshotPosition = new(x, y);
 			Size size = new(RatConfig.IconScan.ScanWidth, RatConfig.IconScan.ScanHeight);
 			var screenshot = GetScreenshot(screenshotPosition, size);
+			// EFT draws the hover tooltip right of the cursor; long names run past the scan
+			// square, so capture it separately. Margins cover ChadVision's tip_window
+			// (x −40s..+700s, y ±120s) with room to spare.
+			var scale = RatEyeEngine.Config.ProcessingConfig.Scale;
+			var tipOrigin = position - new Vector2((int)(60 * scale), (int)(140 * scale));
+			using var tooltipShot = GetScreenshot(tipOrigin, new Size((int)(820 * scale), (int)(280 * scale)));
 			var report = new ScanReport {
 				Mouse = position.ToString(),
 				ScreenshotOrigin = screenshotPosition.ToString(),
-				RatEyeScale = RatEyeEngine.Config.ProcessingConfig.Scale,
+				RatEyeScale = scale,
 				ChadVisionLoaded = Vision != null,
 				Screenshot = (Bitmap)screenshot.Clone(),
+				TooltipShot = (Bitmap)tooltipShot.Clone(),
 			};
 			ScanReport.Publish(report);
+			var tooltipMouse = new System.Drawing.Point(position.X - tipOrigin.X, position.Y - tipOrigin.Y);
 
 			// Scan the item. RatEye finds no icon when the hover highlight or EFT's own
 			// name tooltip breaks its border detection, and template matching throws when
@@ -534,7 +542,7 @@ public class RatScannerMain : INotifyPropertyChanged {
 
 			ItemIconScan? scan;
 			if (icon == null) {
-				scan = RatConfig.IconScan.UseChadVision ? IdentifyWithVision(screenshot, null, screenshotPosition, report) : null;
+				scan = RatConfig.IconScan.UseChadVision ? IdentifyWithVision(screenshot, null, screenshotPosition, tooltipShot, tooltipMouse, report) : null;
 				if (scan == null) {
 					report.Outcome = "RatEye located no icon; " + (report.Outcome ?? "ChadVision disabled in settings") + "; nothing shown";
 					return;
@@ -549,7 +557,7 @@ public class RatScannerMain : INotifyPropertyChanged {
 				report.RatEyeItemId = icon.Item.Id;
 				report.RatEyeItemShortName = icon.Item.ShortName;
 
-				ItemIconScan? visionScan = RatConfig.IconScan.UseChadVision ? IdentifyWithVision(screenshot, icon, screenshotPosition, report) : null;
+				ItemIconScan? visionScan = RatConfig.IconScan.UseChadVision ? IdentifyWithVision(screenshot, icon, screenshotPosition, tooltipShot, tooltipMouse, report) : null;
 				if (!RatConfig.IconScan.UseChadVision) report.Outcome = "RatEye (ChadVision disabled in settings)";
 				scan = visionScan ?? new(icon, screenshotPosition + icon.Position + icon.ItemPosition, RatConfig.ToolTip.Duration);
 			}
@@ -562,12 +570,23 @@ public class RatScannerMain : INotifyPropertyChanged {
 	}
 
 	/// <summary>
+	/// Minimum score for a scan with neither a grid cell nor a RatEye icon. Only a tooltip
+	/// name match (ChadVision's NAME_ACCEPT, 0.8) reaches it; the icon guess on a blind
+	/// one-slot box does not.
+	/// </summary>
+	private const float NameOnlyAccept = 0.8f;
+
+	/// <summary>
 	/// Identifies the item under the mouse using ChadVision. With a RatEye icon its box
-	/// is the slot hint and the fallback cell; without one the cell must come from the grid.
+	/// is the slot hint and the fallback cell; without either, a one-slot box at the cursor
+	/// is used and only a tooltip name match is accepted.
 	/// </summary>
 	/// <param name="screenshotPosition">Screen position of the screenshot's top-left corner</param>
+	/// <param name="tooltipShot">Capture around the cursor where EFT draws its hover tooltip</param>
+	/// <param name="tooltipMouse">Cursor position inside <paramref name="tooltipShot"/></param>
 	/// <returns>The scan, or <see langword="null"/> when ChadVision is unavailable or has no known match</returns>
-	private ItemIconScan? IdentifyWithVision(Bitmap screenshot, RatEye.Processing.Icon? icon, Vector2 screenshotPosition, ScanReport report) {
+	private ItemIconScan? IdentifyWithVision(Bitmap screenshot, RatEye.Processing.Icon? icon, Vector2 screenshotPosition, Bitmap tooltipShot,
+		System.Drawing.Point tooltipMouse, ScanReport report) {
 		var vision = Vision;
 		var fallback = icon == null ? "nothing" : "RatEye";
 		if (vision == null) {
@@ -586,16 +605,16 @@ public class RatScannerMain : INotifyPropertyChanged {
 			// The screenshot is centred on the mouse.
 			var mouse = new System.Drawing.Point(RatConfig.IconScan.ScanWidth / 2, RatConfig.IconScan.ScanHeight / 2);
 			var cell = ChadVision.LocateCell(screenshot, mouse, scale, hintW, hintH);
-			if (cell == null && icon == null) {
-				report.CellSource = "no grid found";
-				report.Outcome = "nothing (ChadVision found no grid cell)";
-				return null;
-			}
-			var rect = cell?.Rect ?? new Rectangle(icon!.Position.X, icon.Position.Y, icon.Size.X, icon.Size.Y);
+			// No cell and no icon (e.g. rig slots): a one-slot box at the cursor, trusted only when
+			// the tooltip name gives a strong match.
+			var nameOnly = cell == null && icon == null;
+			var slotPx = (int)Math.Round(pitch);
+			var rect = cell?.Rect ?? (icon != null
+				? new Rectangle(icon.Position.X, icon.Position.Y, icon.Size.X, icon.Size.Y)
+				: new Rectangle(mouse.X - slotPx / 2, mouse.Y - slotPx / 2, slotPx, slotPx));
 			var slotsW = cell?.SlotW ?? hintW;
 			var slotsH = cell?.SlotH ?? hintH;
-			report.CellSource = cell != null ? "grid" : "RatEye box (no grid found)";
-
+			report.CellSource = cell != null ? "grid" : icon != null ? "RatEye box (no grid found)" : "cursor slot (no grid, no RatEye icon)";
 			var pad = (int)Math.Round(pitch / 8f);
 			var x0 = Math.Max(0, rect.X - pad);
 			var y0 = Math.Max(0, rect.Y - pad);
@@ -609,7 +628,7 @@ public class RatScannerMain : INotifyPropertyChanged {
 			}
 
 			using var crop = screenshot.Clone(new Rectangle(x0, y0, x1 - x0, y1 - y0), PixelFormat.Format24bppRgb);
-			var candidates = vision.Identify(crop, slotsW, slotsH, screenshot, mouse, scale);
+			var candidates = vision.Identify(crop, slotsW, slotsH, tooltipShot, tooltipMouse, scale);
 			report.Crop = (Bitmap)crop.Clone();
 			report.Candidates = [.. candidates.Select(c => new ScanReport.Candidate(c.Id, TarkovDevAPI.GetItems().FirstOrDefault(i => i.Id == c.Id)?.ShortName, c.Score))];
 			if (candidates.Length == 0) {
@@ -618,12 +637,17 @@ public class RatScannerMain : INotifyPropertyChanged {
 			}
 
 			var (id, score) = candidates[0];
+			if (nameOnly && score < NameOnlyAccept) {
+				report.Outcome = $"nothing (no cell; best match {score:0.00} below {NameOnlyAccept}, tooltip name not read)";
+				return null;
+			}
 			var item = TarkovDevAPI.GetItems().FirstOrDefault(i => i.Id == id);
 			if (item == null) {
 				report.Outcome = $"{fallback} (ChadVision id {id} not in tarkov.dev items)";
 				return null;
 			}
-			report.Outcome = icon == null ? "ChadVision (grid only, RatEye found nothing)" : "ChadVision";
+			report.Outcome = nameOnly ? "ChadVision (tooltip name only, no cell)"
+				: icon == null ? "ChadVision (grid only, RatEye found nothing)" : "ChadVision";
 
 			if (icon != null) {
 				return new ItemIconScan(icon, item, score, screenshotPosition + icon.Position + icon.ItemPosition, RatConfig.ToolTip.Duration);
