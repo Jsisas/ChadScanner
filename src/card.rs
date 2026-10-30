@@ -139,8 +139,8 @@ impl CardOptions {
 struct Row {
     /// Index into the group headings.
     group: usize,
-    /// Smart: buildable hideout before the rest.
-    rank: u8,
+    /// Quests or upgrades still to do before this one.
+    rank: u32,
     count: u32,
     /// Share of the requirement's other parts already done (1.0 = this item is the last piece).
     done: f32,
@@ -158,10 +158,6 @@ fn in_goal(t: &needs::TaskNeed, goal: Goal) -> bool {
         Goal::Kappa => t.kappa,
         Goal::Lightkeeper => t.lightkeeper,
     }
-}
-
-fn tags(parts: &[(bool, &str)]) -> String {
-    parts.iter().filter(|(on, _)| *on).map(|(_, t)| *t).collect::<Vec<_>>().join(" · ")
 }
 
 pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardOptions) -> Card {
@@ -212,37 +208,38 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardO
         line(verdict, HEADLINE, color).style(Style::Band).right(why, color),
     ];
 
-    // Groups: smart = NOW / HIDEOUT / LATER, plain = QUESTS / HIDEOUT; quests outside the goal last.
+    // QUESTS and HIDEOUT; quests outside the goal last. Each row says how far away it is.
     let other = format!("NOT {}", o.goal.label().to_uppercase());
-    let groups: [&str; 4] = if o.smart { ["NOW", "HIDEOUT", "LATER", &other] } else { ["QUESTS", "HIDEOUT", "", &other] };
+    let groups: [&str; 3] = ["QUESTS", "HIDEOUT", &other];
+    let plural = |n: u32, one: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {one}s") };
     let mut rows: Vec<Row> = q
         .tasks
         .iter()
         .map(|t| {
             let levels_to_go = p.level.map_or(0, |l| t.min_level.saturating_sub(u32::from(l)));
             let goal = in_goal(t, o.goal);
-            let group = if !goal {
-                3
-            } else if !o.smart || t.is_current() {
-                0
+            let steps = if t.is_current() { 0 } else { t.missing_prereqs };
+            let status = if t.is_current() {
+                "now".to_owned()
+            } else if steps > 0 {
+                plural(steps, "quest")
+            } else if levels_to_go > 0 {
+                format!("Lv {}", t.min_level)
             } else {
-                2
+                cat.tasks.get(&t.task_id).map_or("locked", |task| needs::other_blocker(task, cat, p)).to_owned()
             };
-            let lvl = format!("Lv {}", t.min_level);
+            let fir = if t.fir > 0 { "FIR · " } else { "" };
+            let last = if t.other_done == Some(1.0) { " · last item" } else { "" };
             Row {
-                group,
-                rank: 0,
+                group: if goal { 0 } else { 2 },
+                rank: steps,
                 count: t.count,
                 done: t.other_done.unwrap_or(0.0),
                 levels_to_go,
                 unlocks: t.unlocks,
                 name: format!("{}×  {}", t.count, t.name),
-                tag: tags(&[
-                    (t.fir > 0, "FIR"),
-                    (o.smart && levels_to_go > 0, &lvl),
-                    (o.smart && t.other_done == Some(1.0), "last item"),
-                ]),
-                tag_color: if t.fir > 0 { AMBER } else { SECONDARY },
+                tag: format!("{fir}{status}{last}"),
+                tag_color: if t.is_current() && goal { GREEN } else { SECONDARY },
                 color: if !goal {
                     MUTED
                 } else if t.is_current() {
@@ -252,26 +249,31 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardO
                 },
             }
         })
-        .chain(hideout.iter().map(|h| Row {
-            group: 1,
-            rank: if o.smart && h.buildable { 0 } else { 1 },
-            count: h.remaining,
-            done: h.other_done.unwrap_or(0.0),
-            levels_to_go: h.distance,
-            unlocks: h.unlocks,
-            name: format!("{}×  {} {}", h.remaining, h.station, h.level),
-            tag: tags(&[(o.smart && h.buildable, "buildable"), (o.smart && h.other_done == Some(1.0), "last item")]),
-            tag_color: GREEN,
-            color: if h.buildable { TEXT } else { SECONDARY },
+        .chain(hideout.iter().map(|h| {
+            let status = if h.buildable { "now".to_owned() } else { plural(h.distance, "upgrade") };
+            let last = if h.other_done == Some(1.0) { " · last item" } else { "" };
+            Row {
+                group: 1,
+                rank: h.distance,
+                count: h.remaining,
+                done: h.other_done.unwrap_or(0.0),
+                levels_to_go: 0,
+                unlocks: h.unlocks,
+                name: format!("{}×  {} {}", h.remaining, h.station, h.level),
+                tag: format!("{status}{last}"),
+                tag_color: if h.buildable { GREEN } else { SECONDARY },
+                color: if h.buildable { TEXT } else { SECONDARY },
+            }
         }))
         .collect();
     if o.smart {
+        // Fewest steps away first, then fewest levels, then closest to done, then most unlocks.
         rows.sort_by(|a, b| {
             a.group
                 .cmp(&b.group)
                 .then(a.rank.cmp(&b.rank))
-                .then(b.done.total_cmp(&a.done))
                 .then(a.levels_to_go.cmp(&b.levels_to_go))
+                .then(b.done.total_cmp(&a.done))
                 .then(b.unlocks.cmp(&a.unlocks))
         });
     } else {
@@ -568,28 +570,36 @@ mod tests {
     }
 
     #[test]
-    fn smart_groups_now_hideout_later_with_reason_tags() {
-        let (cat, item) = ordering_catalog();
+    fn quests_and_hideout_show_steps_away() {
+        let (mut cat, item) = ordering_catalog();
+        // Side task behind two unfinished quests.
+        let pre = |id: &str, req: &[&str]| crate::data::Task {
+            id: id.into(),
+            name: id.into(),
+            task_requirements: req.iter().map(|r| crate::data::TaskRequirement { task: (*r).into(), status: vec!["complete".into()] }).collect(),
+            ..Default::default()
+        };
+        cat.tasks.insert("p1".into(), pre("p1", &[]));
+        cat.tasks.insert("p2".into(), pre("p2", &["p1"]));
+        cat.tasks.get_mut("s").unwrap().task_requirements =
+            vec![crate::data::TaskRequirement { task: "p2".into(), status: vec!["complete".into()] }];
         let mut p = Progress { level: Some(16), ..Default::default() };
-        // Rack 2's other part is handed in → Shus is its last missing piece.
         p.hideout_parts.insert("b2x".into(), crate::progress::PartProgress { complete: true, count: 5 });
         let c = item_card(&cat, &item, 0.9, &p, &OPTS);
         assert_eq!(
             show(&c),
             [
                 "Shus | 20× needed",
-                "KEEP 4×  FIR | for a task you have now",
-                "NOW",
-                "4×  Side task | FIR",
-                "HIDEOUT",
-                "2×  Rack 1 | buildable",
-                "5×  Rack 2 | last item",
-                "8×  Stash 2",
-                "LATER",
+                "KEEP 2× | for a buildable upgrade",
+                "QUESTS",
                 "1×  Kappa task | Lv 30",
+                "4×  Side task | FIR · 2 quests",
+                "HIDEOUT",
+                "2×  Rack 1 | now",
+                "5×  Rack 2 | 1 upgrade · last item",
+                "8×  Stash 2 | 1 upgrade",
             ]
         );
-        assert_eq!(c.border, AMBER);
     }
 
     #[test]
@@ -599,7 +609,7 @@ mod tests {
         let o = CardOptions { smart: false, max_rows: 3, ..OPTS };
         assert_eq!(
             show(&item_card(&cat, &item, 0.9, &p, &o))[2..],
-            ["QUESTS", "4×  Side task | FIR", "1×  Kappa task", "HIDEOUT", "8×  Stash 2", "+7× in 2 more"]
+            ["QUESTS", "4×  Side task | FIR · now", "1×  Kappa task | Lv 30", "HIDEOUT", "8×  Stash 2 | 1 upgrade", "+7× in 2 more"]
         );
     }
 
@@ -620,7 +630,7 @@ mod tests {
         let o = CardOptions { goal: Goal::Kappa, hideout: false, ..OPTS };
         assert_eq!(
             show(&item_card(&cat, &item, 0.9, &p, &o))[1..],
-            ["KEEP 1× | for a task you have now", "NOW", "1×  Kappa task", "NOT KAPPA", "4×  Side task | FIR"]
+            ["KEEP 1× | for a task you have now", "QUESTS", "1×  Kappa task | now", "NOT KAPPA", "4×  Side task | FIR · now"]
         );
     }
 }

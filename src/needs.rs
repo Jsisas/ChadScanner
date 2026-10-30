@@ -203,6 +203,23 @@ fn chain_met(req: &OtherRequirement, cat: &Catalog, p: &Progress) -> bool {
     reached.is_some_and(|r| r >= req.value)
 }
 
+/// Why a task with no unfinished prerequisites and a reached level is still not available.
+pub fn other_blocker(task: &Task, cat: &Catalog, p: &Progress) -> &'static str {
+    if task.trader_requirements.iter().any(|r| !matches!(trader_requirement(r, p), Req::Met)) {
+        return "trader level";
+    }
+    if let Some(o) = task.other_requirements.iter().find(|r| !chain_met(r, cat, p)) {
+        return if o.kind.eq_ignore_ascii_case("dialogue") { "trader dialogue" } else { "story step" };
+    }
+    if task.lightkeeper_required {
+        return "Lightkeeper";
+    }
+    if !task.faction_name.is_empty() && !task.faction_name.eq_ignore_ascii_case("Any") && p.faction.is_none() {
+        return "set faction";
+    }
+    "locked"
+}
+
 /// Gate without item context; second value is the level that unlocks a level-locked task.
 pub fn classify_gate(task: &Task, cat: &Catalog, p: &Progress) -> (Gate, Option<u32>) {
     if task_entry(p, &task.id).is_some_and(|e| e.complete || e.failed || e.invalid) {
