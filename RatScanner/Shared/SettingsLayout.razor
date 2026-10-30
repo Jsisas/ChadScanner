@@ -10,12 +10,12 @@
         @* ── Left navigation rail ── *@
         <nav class="settings-rail">
             <div class="settings-rail-scroll">
-                @foreach (var section in Sections)
+                @foreach (var entry in Sections)
                 {
-                    <a class="settings-rail-item @(IsActive(section.Path) ? "settings-rail-item-active" : null)"
-                       href="@section.Path">
-                        <MudIcon Icon="@section.Icon" Size="Size.Small" />
-                        <span class="settings-rail-label">@Localizer[section.LabelKey]</span>
+                    <a class="settings-rail-item @(IsActive(entry.Path) ? "settings-rail-item-active" : null)"
+                       href="@entry.Path">
+                        <MudIcon Icon="@entry.Icon" Size="Size.Small" />
+                        <span class="settings-rail-label">@Localizer[entry.LabelKey]</span>
                     </a>
                 }
             </div>
