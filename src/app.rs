@@ -352,6 +352,16 @@ impl App {
     }
 }
 
+impl App {
+    /// Closes a Settings window this overlay opened, so Quit leaves nothing running that locks the exe.
+    pub fn shutdown(&self) {
+        if let Some(mut c) = self.settings.lock().unwrap().take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
 impl ui::TrayActions for Arc<App> {
     fn open_settings(&self) {
         let mut child = self.settings.lock().unwrap();

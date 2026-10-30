@@ -95,6 +95,7 @@ fn run() -> anyhow::Result<()> {
 
     let actions: Arc<app::App> = app;
     win::ui::run(&ui, ui_rx, &actions)?;
+    actions.shutdown();
     log::info!("quit");
     Ok(())
 }
