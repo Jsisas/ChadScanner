@@ -83,6 +83,27 @@ impl Hotkey {
     }
 }
 
+/// Quests outside the goal sink to the bottom of the card and do not count toward KEEP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Goal {
+    #[default]
+    None,
+    Kappa,
+    Lightkeeper,
+}
+
+impl Goal {
+    pub const ALL: [Goal; 3] = [Goal::None, Goal::Kappa, Goal::Lightkeeper];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Goal::None => "None",
+            Goal::Kappa => "Kappa",
+            Goal::Lightkeeper => "Lightkeeper",
+        }
+    }
+}
+
 /// Per-mode TarkovTracker tokens, DPAPI-encrypted (user scope) and hex-encoded.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -111,6 +132,9 @@ pub struct Config {
     pub show_hideout: bool,
     pub show_barters: bool,
     pub show_crafts: bool,
+    /// Priority ordering of need rows (see `card`); off = quests then hideout, biggest count first.
+    pub smart_ordering: bool,
+    pub goal: Goal,
     pub log_tracking: bool,
     pub logs_override: String,
 }
@@ -131,6 +155,8 @@ impl Default for Config {
             show_hideout: true,
             show_barters: true,
             show_crafts: true,
+            smart_ordering: true,
+            goal: Goal::None,
             log_tracking: true,
             logs_override: String::new(),
         }

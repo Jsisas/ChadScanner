@@ -1,5 +1,6 @@
 //! The floating card: content from catalog + progress, rendered into a premultiplied pixmap.
 use crate::data::{Catalog, Item};
+use crate::config::Goal;
 use crate::needs;
 use crate::progress::Progress;
 use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
@@ -77,6 +78,8 @@ pub struct CardOptions {
     pub hideout: bool,
     pub barters: bool,
     pub crafts: bool,
+    pub smart: bool,
+    pub goal: Goal,
 }
 
 impl CardOptions {
@@ -88,17 +91,57 @@ impl CardOptions {
             hideout: c.show_hideout,
             barters: c.show_barters,
             crafts: c.show_crafts,
+            smart: c.smart_ordering,
+            goal: c.goal,
         }
     }
 }
 
-/// One need row; ordered by priority: active task, available task, buildable hideout,
-/// other tasks in unlock order, other hideout levels in unlock order.
+/// One need row with its ordering keys.
 struct Row {
+    /// Outside the goal: always last.
+    off_goal: bool,
+    /// Smart groups: active task, available task, buildable hideout, other tasks, other hideout.
     rank: u8,
+    hideout: bool,
     count: u32,
-    text: String,
+    /// Share of the requirement's other parts already done (1.0 = this item is the last piece).
+    done: f32,
+    levels_to_go: u32,
+    unlocks: u32,
+    name: String,
+    /// Reason shown in smart mode.
+    tag: String,
     color: Rgb,
+}
+
+impl Row {
+    fn text(&self, smart: bool) -> String {
+        if smart { format!("{}{}", self.name, self.tag) } else { self.name.clone() }
+    }
+}
+
+fn sort_rows(rows: &mut [Row], smart: bool) {
+    if smart {
+        rows.sort_by(|a, b| {
+            a.off_goal
+                .cmp(&b.off_goal)
+                .then(a.rank.cmp(&b.rank))
+                .then(b.done.total_cmp(&a.done))
+                .then(a.levels_to_go.cmp(&b.levels_to_go))
+                .then(b.unlocks.cmp(&a.unlocks))
+        });
+    } else {
+        rows.sort_by(|a, b| a.off_goal.cmp(&b.off_goal).then(a.hideout.cmp(&b.hideout)).then(b.count.cmp(&a.count)));
+    }
+}
+
+fn in_goal(t: &needs::TaskNeed, goal: Goal) -> bool {
+    match goal {
+        Goal::None => true,
+        Goal::Kappa => t.kappa,
+        Goal::Lightkeeper => t.lightkeeper,
+    }
 }
 
 pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardOptions) -> Card {
@@ -106,21 +149,29 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardO
     let hideout = if o.hideout { needs::hideout_needs(cat, &item.id, p) } else { Vec::new() };
     let quest_total: u32 = q.tasks.iter().map(|t| t.count).sum();
     let hideout_total: u32 = hideout.iter().map(|h| h.remaining).sum();
-    let buildable: u32 = hideout.iter().filter(|h| h.buildable).map(|h| h.remaining).sum();
     let total = quest_total + hideout_total;
+    // KEEP counts only quests inside the goal.
+    let goal_tasks = || q.tasks.iter().filter(|t| in_goal(t, o.goal));
+    let current: u32 = goal_tasks().filter(|t| t.is_current()).map(|t| t.count).sum();
+    let current_fir = goal_tasks().any(|t| t.is_current() && t.fir > 0);
+    let buildable: u32 = hideout.iter().filter(|h| h.buildable).map(|h| h.remaining).sum();
+    let kappa: u32 = q.tasks.iter().filter(|t| t.kappa).map(|t| t.count).sum();
+    let keep_later: u32 = goal_tasks().map(|t| t.count).sum::<u32>() + hideout_total;
     let (barters, crafts) = needs::recipes_using(cat, &item.id);
     let best = item.best_trader();
 
     let title = if score < 0.7 { format!("{} ?", item.short_name) } else { item.short_name.clone() };
-    let (verdict, color) = if q.current > 0 {
-        let fir = if q.current_fir > 0 { " (FIR)" } else { "" };
-        (format!("KEEP – QUEST {}×{fir}", q.current), AMBER)
+    let (verdict, color) = if current > 0 {
+        let fir = if current_fir { " (FIR)" } else { "" };
+        (format!("KEEP – QUEST {current}×{fir}"), AMBER)
     } else if buildable > 0 {
         (format!("KEEP – HIDEOUT {buildable}×"), AMBER)
-    } else if q.kappa > 0 {
-        (format!("KEEP – KAPPA {}×", q.kappa), PURPLE)
+    } else if o.goal == Goal::None && kappa > 0 {
+        (format!("KEEP – KAPPA {kappa}×"), PURPLE)
+    } else if keep_later > 0 {
+        (format!("KEEP – LATER {keep_later}×"), LATER)
     } else if total > 0 {
-        (format!("KEEP – LATER {total}×"), LATER)
+        (format!("NOT FOR {} – {total}×", o.goal.label().to_uppercase()), GREY)
     } else {
         // Items without a flea price are judged by their best trader offer.
         let slots = (item.width * item.height).max(1);
@@ -151,31 +202,47 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardO
         lines.push(line(format!("{name} {} ₽", rub(b.price_rub)), VALUE, TEXT));
     }
 
-    // Both lists arrive in their own priority order; the stable sort interleaves them by rank.
+    let last = |d: Option<f32>| if d == Some(1.0) { " · last item" } else { "" };
     let mut rows: Vec<Row> = q
         .tasks
         .iter()
-        .map(|t| Row {
-            rank: match t.gate {
-                needs::Gate::Active => 0,
-                needs::Gate::Available => 1,
-                _ => 3,
-            },
-            count: t.count,
-            text: format!("{}× {}", t.count, t.name),
-            color: if t.is_current() { TEXT } else { SECONDARY },
+        .map(|t| {
+            let levels_to_go = p.level.map_or(0, |l| t.min_level.saturating_sub(u32::from(l)));
+            let lvl = if levels_to_go > 0 { format!(" (Lv{})", t.min_level) } else { String::new() };
+            Row {
+                off_goal: !in_goal(t, o.goal),
+                rank: match t.gate {
+                    needs::Gate::Active => 0,
+                    needs::Gate::Available => 1,
+                    _ => 3,
+                },
+                hideout: false,
+                count: t.count,
+                done: t.other_done.unwrap_or(0.0),
+                levels_to_go,
+                unlocks: t.unlocks,
+                name: format!("{}× {}", t.count, t.name),
+                tag: format!("{lvl}{}", last(t.other_done)),
+                color: if t.is_current() && in_goal(t, o.goal) { TEXT } else { SECONDARY },
+            }
         })
         .chain(hideout.iter().map(|h| Row {
+            off_goal: false,
             rank: if h.buildable { 2 } else { 4 },
+            hideout: true,
             count: h.remaining,
-            text: format!("{}× {} Lv{}", h.remaining, h.station, h.level),
+            done: h.other_done.unwrap_or(0.0),
+            levels_to_go: h.distance,
+            unlocks: h.unlocks,
+            name: format!("{}× {} Lv{}", h.remaining, h.station, h.level),
+            tag: last(h.other_done).to_owned(),
             color: if h.buildable { TEXT } else { SECONDARY },
         }))
         .collect();
-    rows.sort_by_key(|r| r.rank);
+    sort_rows(&mut rows, o.smart);
     let shown = o.max_rows as usize;
     for r in rows.iter().take(shown) {
-        lines.push(line(r.text.clone(), DETAIL, r.color));
+        lines.push(line(r.text(o.smart), DETAIL, r.color));
     }
     if let Some(l) = more(rows.iter().skip(shown).map(|r| r.count)) {
         lines.push(l);
@@ -334,7 +401,7 @@ mod tests {
     }
 
     const OPTS: CardOptions =
-        CardOptions { show_non_fir: true, max_rows: 1, quests: true, hideout: true, barters: true, crafts: true };
+        CardOptions { show_non_fir: true, max_rows: 1, quests: true, hideout: true, barters: true, crafts: true, smart: true, goal: Goal::None };
 
     #[test]
     fn verdict_precedence_quest_over_price() {
@@ -377,5 +444,60 @@ mod tests {
         assert_eq!(text(&p, &opts)[2], "Total 9×  (quests 2 · hideout 7)");
         let no_hideout = CardOptions { hideout: false, ..opts };
         assert_eq!(text(&p, &no_hideout)[2..], ["Total 2×  (quests 2)", "2× Task"]);
+    }
+
+    fn ordering_catalog() -> (Catalog, Item) {
+        use crate::data::{HideoutRequirement, Objective, Station, StationLevel, Task};
+        let mut cat = Catalog::default();
+        let item = Item { id: "i".into(), short_name: "Shus".into(), width: 1, height: 1, ..Default::default() };
+        let give = |id: &str, n| Objective { id: id.into(), kind: "giveItem".into(), count: n, items: vec!["i".into()], ..Default::default() };
+        let mut kappa = Task { id: "k".into(), name: "Kappa task".into(), objectives: vec![give("ok", 1)], ..Default::default() };
+        kappa.kappa_required = true;
+        kappa.min_player_level = 30;
+        cat.tasks.insert("k".into(), kappa);
+        cat.tasks.insert("s".into(), Task { id: "s".into(), name: "Side task".into(), objectives: vec![give("os", 4)], ..Default::default() });
+        let req = |id: &str, item: &str, count| HideoutRequirement { id: id.into(), item: item.into(), count, fir: false };
+        let lvl = |id: &str, level, reqs| StationLevel { id: id.into(), level, item_requirements: reqs, ..Default::default() };
+        cat.stations.push(Station {
+            id: "a".into(),
+            name: "Stash".into(),
+            levels: vec![lvl("a-1", 1, vec![]), lvl("a-2", 2, vec![req("a2", "i", 8), req("a2x", "x", 5)])],
+        });
+        cat.stations.push(Station {
+            id: "b".into(),
+            name: "Rack".into(),
+            levels: vec![lvl("b-1", 1, vec![]), lvl("b-2", 2, vec![req("b2", "i", 5), req("b2x", "x", 5)])],
+        });
+        (cat, item)
+    }
+
+    fn rows(cat: &Catalog, item: &Item, p: &Progress, o: &CardOptions) -> Vec<String> {
+        item_card(cat, item, 0.9, p, o).lines.into_iter().skip(3).map(|l| l.text).collect()
+    }
+
+    #[test]
+    fn smart_puts_last_missing_piece_first_and_tags_reasons() {
+        let (cat, item) = ordering_catalog();
+        let mut p = Progress { level: Some(16), ..Default::default() };
+        // Nothing built → level 2 of each station is not buildable; Rack 2 has its other part handed in.
+        p.hideout_parts.insert("b2x".into(), crate::progress::PartProgress { complete: true, count: 5 });
+        let o = CardOptions { max_rows: 10, ..OPTS };
+        assert_eq!(
+            rows(&cat, &item, &p, &o),
+            ["4× Side task", "1× Kappa task (Lv30)", "5× Rack Lv2 · last item", "8× Stash Lv2"]
+        );
+        // Off: quests then hideout, biggest count first, no tags.
+        let plain = CardOptions { smart: false, ..o };
+        assert_eq!(rows(&cat, &item, &p, &plain), ["4× Side task", "1× Kappa task", "8× Stash Lv2", "5× Rack Lv2"]);
+    }
+
+    #[test]
+    fn goal_drops_other_quests_from_keep_and_sinks_them() {
+        let (cat, item) = ordering_catalog();
+        let p = Progress { level: Some(40), ..Default::default() };
+        let o = CardOptions { max_rows: 10, goal: Goal::Kappa, hideout: false, ..OPTS };
+        let card = item_card(&cat, &item, 0.9, &p, &o);
+        assert_eq!(card.lines[1].text, "KEEP – QUEST 1×");
+        assert_eq!(rows(&cat, &item, &p, &o), ["1× Kappa task", "4× Side task"]);
     }
 }

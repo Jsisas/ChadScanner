@@ -212,6 +212,13 @@ impl eframe::App for SettingsApp {
                     ui.checkbox(&mut self.cfg.show_crafts, "Crafts");
                 });
                 ui.add(egui::Slider::new(&mut self.cfg.max_rows, 0..=15).text("Quest/hideout rows"));
+                ui.checkbox(&mut self.cfg.smart_ordering, "Smart ordering")
+                    .on_hover_text("Active and available tasks, then buildable hideout, then the rest; closest to done and fewest levels away first. Off: quests then hideout, biggest count first.");
+                egui::ComboBox::from_label("Goal").selected_text(self.cfg.goal.label()).show_ui(ui, |ui| {
+                    for g in crate::config::Goal::ALL {
+                        ui.selectable_value(&mut self.cfg.goal, g, g.label());
+                    }
+                });
 
                 ui.separator();
                 ui.heading("EFT logs");

@@ -32,6 +32,12 @@ pub struct TaskNeed {
     /// Unfinished tasks in the prerequisite chain.
     pub missing_prereqs: u32,
     pub min_level: u32,
+    pub kappa: bool,
+    pub lightkeeper: bool,
+    /// Share of the task's other required objectives already done; `None` when there are none.
+    pub other_done: Option<f32>,
+    /// Tasks that (transitively) require this one.
+    pub unlocks: u32,
 }
 
 impl TaskNeed {
@@ -64,6 +70,30 @@ pub struct HideoutNeed {
     pub buildable: bool,
     /// Unbuilt station levels (own and prerequisite) plus unmet trader gates before this one.
     pub distance: u32,
+    /// Share of the level's other item requirements already handed in; `None` when there are none.
+    pub other_done: Option<f32>,
+    /// Station levels that (transitively) require this one.
+    pub unlocks: u32,
+}
+
+/// done / total, `None` when total is 0.
+fn share(done: u32, total: u32) -> Option<f32> {
+    (total > 0).then(|| done as f32 / total as f32)
+}
+
+/// Progress on the task's required objectives that do not involve `item_id`.
+fn other_objectives_done(task: &Task, item_id: &str, p: &Progress) -> Option<f32> {
+    let involves = |o: &Objective| {
+        o.items.iter().any(|i| i == item_id) || o.marker_item.as_deref() == Some(item_id) || o.build_item.as_deref() == Some(item_id)
+    };
+    let (mut done, mut total) = (0, 0);
+    for o in task.objectives.iter().filter(|o| !o.optional && !involves(o)) {
+        let need = o.count.max(1);
+        let e = p.objectives.get(&o.id).filter(|e| !e.invalid);
+        done += e.map_or(0, |e| if e.complete { need } else { e.count.min(need) });
+        total += need;
+    }
+    share(done, total)
 }
 
 fn task_entry<'a>(p: &'a Progress, id: &str) -> Option<&'a crate::progress::TaskProgress> {
@@ -344,6 +374,10 @@ pub fn quest_needs(cat: &Catalog, item_id: &str, p: &Progress, show_non_fir: boo
             fir,
             missing_prereqs: missing_prereqs(task, cat, p),
             min_level: task.min_player_level,
+            kappa: task.kappa_required,
+            lightkeeper: task.lightkeeper_required,
+            other_done: other_objectives_done(task, item_id, p),
+            unlocks: cat.task_unlocks.get(&task.id).copied().unwrap_or(0),
         });
     }
     let rank = |t: &TaskNeed| match t.gate {
@@ -422,6 +456,11 @@ pub fn hideout_needs(cat: &Catalog, item_id: &str, p: &Progress) -> Vec<HideoutN
                 let traders_unmet =
                     level.trader_requirements.iter().filter(|r| !matches!(trader_requirement(r, p), Req::Met)).count() as u32;
                 let distance = path.len().saturating_sub(1) as u32 + traders_unmet;
+                let (mut done, mut total) = (0, 0);
+                for r in level.item_requirements.iter().filter(|r| r.item != item_id) {
+                    done += p.hideout_parts.get(&r.id).map_or(0, |e| if e.complete { r.count } else { e.count.min(r.count) });
+                    total += r.count;
+                }
                 out.push(HideoutNeed {
                     station: station.name.clone(),
                     level: level.level,
@@ -429,6 +468,8 @@ pub fn hideout_needs(cat: &Catalog, item_id: &str, p: &Progress) -> Vec<HideoutN
                     fir,
                     buildable: distance == 0,
                     distance,
+                    other_done: share(done, total),
+                    unlocks: cat.level_unlocks.get(&level.id).copied().unwrap_or(0),
                 });
             }
         }
@@ -581,7 +622,16 @@ mod tests {
         p.hideout_parts.insert("r2".into(), crate::progress::PartProgress { complete: false, count: 1 });
         assert_eq!(
             hideout_needs(&c, ITEM, &p),
-            vec![HideoutNeed { station: "Medstation".into(), level: 2, remaining: 4, fir: true, buildable: true, distance: 0 }]
+            vec![HideoutNeed {
+                station: "Medstation".into(),
+                level: 2,
+                remaining: 4,
+                fir: true,
+                buildable: true,
+                distance: 0,
+                other_done: None,
+                unlocks: 0,
+            }]
         );
     }
 

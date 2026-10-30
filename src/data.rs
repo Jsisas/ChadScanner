@@ -132,6 +132,57 @@ pub struct Catalog {
     pub traders: HashMap<String, String>,
     /// Story-chain counter id → (required value, task id) of every task it gates.
     pub chains: HashMap<String, Vec<(f64, String)>>,
+    /// Task id → number of tasks that (transitively) require it.
+    pub task_unlocks: HashMap<String, u32>,
+    /// Station level id → number of station levels that (transitively) require it.
+    pub level_unlocks: HashMap<String, u32>,
+}
+
+/// For each node, how many nodes are reachable through `edges` (node → direct dependents).
+fn reach_counts(edges: &HashMap<String, Vec<String>>) -> HashMap<String, u32> {
+    edges
+        .keys()
+        .map(|start| {
+            let mut seen = std::collections::HashSet::new();
+            let mut stack: Vec<&String> = edges[start].iter().collect();
+            while let Some(n) = stack.pop() {
+                if seen.insert(n) {
+                    stack.extend(edges.get(n).into_iter().flatten());
+                }
+            }
+            (start.clone(), seen.len() as u32)
+        })
+        .collect()
+}
+
+impl Catalog {
+    fn compute_unlocks(&mut self) {
+        let mut task_edges: HashMap<String, Vec<String>> = HashMap::new();
+        for t in self.tasks.values() {
+            for r in &t.task_requirements {
+                task_edges.entry(r.task.clone()).or_default().push(t.id.clone());
+            }
+        }
+        self.task_unlocks = reach_counts(&task_edges);
+
+        let mut level_edges: HashMap<String, Vec<String>> = HashMap::new();
+        let id_of = |station: &str, level: u8| {
+            self.stations.iter().find(|s| s.id == station)?.levels.iter().find(|l| l.level == level).map(|l| l.id.clone())
+        };
+        for s in &self.stations {
+            for (i, l) in s.levels.iter().enumerate() {
+                if let Some(next) = s.levels.get(i + 1) {
+                    level_edges.entry(l.id.clone()).or_default().push(next.id.clone());
+                }
+                for (rs, rl) in &l.station_requirements {
+                    if let Some(req) = id_of(rs, *rl) {
+                        level_edges.entry(req).or_default().push(l.id.clone());
+                    }
+                }
+            }
+        }
+        self.level_unlocks = reach_counts(&level_edges);
+    }
 }
 
 // ---- raw json.tarkov.dev shapes (only the fields used) ----
@@ -446,7 +497,18 @@ impl Catalog {
         let raw_traders: HashMap<String, RawTrader> = serde_json::from_value(data(body("traders")?)?)?;
         let traders = raw_traders.into_values().map(|t| (t.id, tr(&traders_en, &t.name))).collect();
 
-        Ok(Catalog { items, tasks, stations, barters: recipes("barters")?, crafts: recipes("crafts")?, traders, chains })
+        let mut c = Catalog {
+            items,
+            tasks,
+            stations,
+            barters: recipes("barters")?,
+            crafts: recipes("crafts")?,
+            traders,
+            chains,
+            ..Default::default()
+        };
+        c.compute_unlocks();
+        Ok(c)
     }
 }
 
@@ -571,5 +633,28 @@ mod tests {
         assert_eq!(c.traders["t1"], "Prapor");
         assert_eq!(c.barters[0].required_items, vec!["a"]);
         assert_eq!(c.chains["v"], vec![(3.0, "q".to_owned())]);
+    }
+
+    #[test]
+    fn unlock_counts_are_transitive() {
+        use crate::data::{Station, StationLevel, Task, TaskRequirement};
+        let mut c = Catalog::default();
+        let t = |id: &str, pre: &[&str]| Task {
+            id: id.into(),
+            task_requirements: pre.iter().map(|p| TaskRequirement { task: (*p).into(), status: vec![] }).collect(),
+            ..Default::default()
+        };
+        for task in [t("a", &[]), t("b", &["a"]), t("c", &["b"]), t("d", &["a"])] {
+            c.tasks.insert(task.id.clone(), task);
+        }
+        let lvl = |id: &str, level, req: Vec<(String, u8)>| StationLevel { id: id.into(), level, station_requirements: req, ..Default::default() };
+        c.stations = vec![
+            Station { id: "g".into(), levels: vec![lvl("g-1", 1, vec![]), lvl("g-2", 2, vec![])], ..Default::default() },
+            Station { id: "w".into(), levels: vec![lvl("w-1", 1, vec![("g".into(), 2)])], ..Default::default() },
+        ];
+        c.compute_unlocks();
+        assert_eq!((c.task_unlocks["a"], c.task_unlocks["b"]), (3, 1));
+        // g-1 → g-2 → w-1
+        assert_eq!((c.level_unlocks["g-1"], c.level_unlocks["g-2"]), (2, 1));
     }
 }
