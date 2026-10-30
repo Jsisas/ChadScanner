@@ -78,6 +78,7 @@ internal static partial class RatConfig {
 		internal static int ScanHeight => (int)(GameScale * 896);
 		internal static Hotkey Hotkey = new([Key.LeftShift], [MouseButton.Left]);
 		internal static bool UseCachedIcons = true;
+		internal static bool UseTarkovVision = true;
 	}
 
 	// ToolTip options
@@ -191,6 +192,9 @@ internal static partial class RatConfig {
 		internal static bool ShowHideoutInfo = true;
 		internal static bool ShowBarterInfo = true;
 		internal static bool ShowCraftsInfo = true;
+		internal static bool ShowOverlayPrice = true;
+		internal static bool ShowOverlayTaskBadge = true;
+		internal static bool ShowOverlayHideoutBadge = true;
 	}
 
 	// Application hotkeys
@@ -279,6 +283,7 @@ internal static partial class RatConfig {
 		IconScan.ScanRotatedIcons = config.ReadBool(nameof(IconScan.ScanRotatedIcons), IconScan.ScanRotatedIcons);
 		IconScan.Hotkey = config.ReadHotkey(nameof(IconScan.Hotkey), IconScan.Hotkey);
 		IconScan.UseCachedIcons = config.ReadBool(nameof(IconScan.UseCachedIcons), IconScan.UseCachedIcons);
+		IconScan.UseTarkovVision = config.ReadBool(nameof(IconScan.UseTarkovVision), IconScan.UseTarkovVision);
 
 		config.Section = nameof(ToolTip);
 		ToolTip.Duration = config.ReadInt(nameof(ToolTip.Duration), ToolTip.Duration);
@@ -340,6 +345,9 @@ internal static partial class RatConfig {
 		FloatingTooltip.ShowHideoutInfo = config.ReadBool(nameof(FloatingTooltip.ShowHideoutInfo), FloatingTooltip.ShowHideoutInfo);
 		FloatingTooltip.ShowBarterInfo = config.ReadBool(nameof(FloatingTooltip.ShowBarterInfo), FloatingTooltip.ShowBarterInfo);
 		FloatingTooltip.ShowCraftsInfo = config.ReadBool(nameof(FloatingTooltip.ShowCraftsInfo), FloatingTooltip.ShowCraftsInfo);
+		FloatingTooltip.ShowOverlayPrice = config.ReadBool(nameof(FloatingTooltip.ShowOverlayPrice), FloatingTooltip.ShowOverlayPrice);
+		FloatingTooltip.ShowOverlayTaskBadge = config.ReadBool(nameof(FloatingTooltip.ShowOverlayTaskBadge), FloatingTooltip.ShowOverlayTaskBadge);
+		FloatingTooltip.ShowOverlayHideoutBadge = config.ReadBool(nameof(FloatingTooltip.ShowOverlayHideoutBadge), FloatingTooltip.ShowOverlayHideoutBadge);
 
 		config.Section = nameof(Hotkeys);
 		Hotkeys.OpenWiki = config.ReadHotkey(nameof(Hotkeys.OpenWiki), Hotkeys.OpenWiki);
@@ -384,6 +392,7 @@ internal static partial class RatConfig {
 		config.WriteBool(nameof(IconScan.ScanRotatedIcons), IconScan.ScanRotatedIcons);
 		config.WriteHotkey(nameof(IconScan.Hotkey), IconScan.Hotkey);
 		config.WriteBool(nameof(IconScan.UseCachedIcons), IconScan.UseCachedIcons);
+		config.WriteBool(nameof(IconScan.UseTarkovVision), IconScan.UseTarkovVision);
 
 		config.Section = nameof(ToolTip);
 		config.WriteInt(nameof(ToolTip.Duration), ToolTip.Duration);
@@ -445,6 +454,9 @@ internal static partial class RatConfig {
 		config.WriteBool(nameof(FloatingTooltip.ShowHideoutInfo), FloatingTooltip.ShowHideoutInfo);
 		config.WriteBool(nameof(FloatingTooltip.ShowBarterInfo), FloatingTooltip.ShowBarterInfo);
 		config.WriteBool(nameof(FloatingTooltip.ShowCraftsInfo), FloatingTooltip.ShowCraftsInfo);
+		config.WriteBool(nameof(FloatingTooltip.ShowOverlayPrice), FloatingTooltip.ShowOverlayPrice);
+		config.WriteBool(nameof(FloatingTooltip.ShowOverlayTaskBadge), FloatingTooltip.ShowOverlayTaskBadge);
+		config.WriteBool(nameof(FloatingTooltip.ShowOverlayHideoutBadge), FloatingTooltip.ShowOverlayHideoutBadge);
 
 		config.Section = nameof(Hotkeys);
 		config.WriteHotkey(nameof(Hotkeys.OpenWiki), Hotkeys.OpenWiki);

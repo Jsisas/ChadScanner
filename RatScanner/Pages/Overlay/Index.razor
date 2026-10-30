@@ -37,32 +37,38 @@
                         </div>
 
                         <div style="overflow: hidden;">
-                            @if (item.Avg24HPrice >= item.GetBestSellToTraderOffer()?.PriceRub) {
-                                <div class="stroke">
-                                    @item.Avg24HPrice.ToShortString().AsRubs()
-                                </div>
-                            } else {
-                                <div class="d-flex align-center stroke">
-                                    @{
-                                        var bestTraderOffer = item.GetBestSellToTraderOffer();
-                                    }
-                                    @bestTraderOffer?.PriceRub.ToShortString().AsRubs()
-                                    <MudAvatar Image="@(bestTraderOffer?.Trader?.ImageLink)" Size="Size.Small" Style="float: right;"
-                                               Class="ml-1" />
-                                </div>
+                            @if (RatConfig.FloatingTooltip.ShowOverlayPrice) {
+                                if (item.Avg24HPrice >= item.GetBestSellToTraderOffer()?.PriceRub) {
+                                    <div class="stroke">
+                                        @item.Avg24HPrice.ToShortString().AsRubs()
+                                    </div>
+                                } else {
+                                    <div class="d-flex align-center stroke">
+                                        @{
+                                            var bestTraderOffer = item.GetBestSellToTraderOffer();
+                                        }
+                                        @bestTraderOffer?.PriceRub.ToShortString().AsRubs()
+                                        <MudAvatar Image="@(bestTraderOffer?.Trader?.ImageLink)" Size="Size.Small" Style="float: right;"
+                                                   Class="ml-1" />
+                                    </div>
+                                }
                             }
 
-                            @if (MenuVM.TaskRemaining > 0) {
-                                <div class="d-flex align-center stroke">
-                                    @MenuVM.TaskRemaining
-                                    <MudIcon Icon="@Icons.Material.Filled.Checklist" Size="Size.Small" Class="ml-1" />
-                                </div>
+                            @if (RatConfig.FloatingTooltip.ShowOverlayTaskBadge) {
+                                if (MenuVM.TaskRemaining > 0) {
+                                    <div class="d-flex align-center stroke">
+                                        @MenuVM.TaskRemaining
+                                        <MudIcon Icon="@Icons.Material.Filled.Checklist" Size="Size.Small" Class="ml-1" />
+                                    </div>
+                                }
                             }
-                            @if (MenuVM.HideoutRemaining > 0) {
-                                <div class="d-flex align-center stroke">
-                                    @MenuVM.HideoutRemaining
-                                    <MudIcon Icon="@Icons.Material.Filled.House" Size="Size.Small" Class="ml-1" />
-                                </div>
+                            @if (RatConfig.FloatingTooltip.ShowOverlayHideoutBadge) {
+                                if (MenuVM.HideoutRemaining > 0) {
+                                    <div class="d-flex align-center stroke">
+                                        @MenuVM.HideoutRemaining
+                                        <MudIcon Icon="@Icons.Material.Filled.House" Size="Size.Small" Class="ml-1" />
+                                    </div>
+                                }
                             }
                         </div>
                     </div>
@@ -73,26 +79,32 @@
                     top: @(itemScan.GetToolTipPosition().Y - VirtualScreenOffset.YOffset)px;
                     background: #121212; padding: 4px;">
 
-                    @if (item.Avg24HPrice >= item.GetBestSellToTraderOffer()?.PriceRub) {
-                        <div class="stroke">
-                            @item.Avg24HPrice.ToShortString().AsRubs()
-                        </div>
-                    } else {
-                        <div class="d-flex align-center stroke">
-                            @{
-                                var bestTraderOffer = item.GetBestSellToTraderOffer();
-                            }
-                            @bestTraderOffer?.PriceRub.ToShortString().AsRubs()
-                            <MudAvatar Image="@(bestTraderOffer?.Trader?.ImageLink)" Size="Size.Small" Style="float: right;"
-                                       Class="ml-1" />
-                        </div>
+                    @if (RatConfig.FloatingTooltip.ShowOverlayPrice) {
+                        if (item.Avg24HPrice >= item.GetBestSellToTraderOffer()?.PriceRub) {
+                            <div class="stroke">
+                                @item.Avg24HPrice.ToShortString().AsRubs()
+                            </div>
+                        } else {
+                            <div class="d-flex align-center stroke">
+                                @{
+                                    var bestTraderOffer = item.GetBestSellToTraderOffer();
+                                }
+                                @bestTraderOffer?.PriceRub.ToShortString().AsRubs()
+                                <MudAvatar Image="@(bestTraderOffer?.Trader?.ImageLink)" Size="Size.Small" Style="float: right;"
+                                           Class="ml-1" />
+                            </div>
+                        }
                     }
 
-                    @if (MenuVM.TaskRemaining > 0) {
-                        <MudIcon Icon="@Icons.Material.Filled.Checklist" Size="Size.Small" Class="ml-1" />
+                    @if (RatConfig.FloatingTooltip.ShowOverlayTaskBadge) {
+                        if (MenuVM.TaskRemaining > 0) {
+                            <MudIcon Icon="@Icons.Material.Filled.Checklist" Size="Size.Small" Class="ml-1" />
+                        }
                     }
-                    @if (MenuVM.HideoutRemaining > 0) {
-                        <MudIcon Icon="@Icons.Material.Filled.House" Size="Size.Small" Class="ml-1" />
+                    @if (RatConfig.FloatingTooltip.ShowOverlayHideoutBadge) {
+                        if (MenuVM.HideoutRemaining > 0) {
+                            <MudIcon Icon="@Icons.Material.Filled.House" Size="Size.Small" Class="ml-1" />
+                        }
                     }
                 </div>
             }

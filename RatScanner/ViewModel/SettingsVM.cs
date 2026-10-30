@@ -52,6 +52,7 @@ internal class SettingsVM : INotifyPropertyChanged {
 	public bool EnableIconScan { get; set; }
 	public bool ScanRotatedIcons { get; set; }
 	public bool UseCachedIcons { get; set; }
+	public bool IsIconScanUseTarkovVision { get; set; }
 	public Hotkey IconScanHotkey { get; set; }
 
 	public int ToolTipMilli { get; set; }
@@ -121,6 +122,9 @@ internal class SettingsVM : INotifyPropertyChanged {
 	public bool IsFloatingTooltipShowHideoutInfo { get; set; }
 	public bool IsFloatingTooltipShowBarterInfo { get; set; }
 	public bool IsFloatingTooltipShowCraftsInfo { get; set; }
+	public bool IsFloatingTooltipShowOverlayPrice { get; set; }
+	public bool IsFloatingTooltipShowOverlayTaskBadge { get; set; }
+	public bool IsFloatingTooltipShowOverlayHideoutBadge { get; set; }
 
 	// EFT log tracking
 	public bool EnableLogTracking { get; set; }
@@ -152,6 +156,7 @@ internal class SettingsVM : INotifyPropertyChanged {
 		EnableIconScan = RatConfig.IconScan.Enable;
 		ScanRotatedIcons = RatConfig.IconScan.ScanRotatedIcons;
 		UseCachedIcons = RatConfig.IconScan.UseCachedIcons;
+		IsIconScanUseTarkovVision = RatConfig.IconScan.UseTarkovVision;
 		IconScanHotkey = new Hotkey(RatConfig.IconScan.Hotkey);
 
 		ToolTipMilli = RatConfig.ToolTip.Duration;
@@ -225,6 +230,9 @@ internal class SettingsVM : INotifyPropertyChanged {
 		IsFloatingTooltipShowHideoutInfo = RatConfig.FloatingTooltip.ShowHideoutInfo;
 		IsFloatingTooltipShowBarterInfo = RatConfig.FloatingTooltip.ShowBarterInfo;
 		IsFloatingTooltipShowCraftsInfo = RatConfig.FloatingTooltip.ShowCraftsInfo;
+		IsFloatingTooltipShowOverlayPrice = RatConfig.FloatingTooltip.ShowOverlayPrice;
+		IsFloatingTooltipShowOverlayTaskBadge = RatConfig.FloatingTooltip.ShowOverlayTaskBadge;
+		IsFloatingTooltipShowOverlayHideoutBadge = RatConfig.FloatingTooltip.ShowOverlayHideoutBadge;
 
 		EnableLogTracking = RatConfig.LogTracking.Enable;
 		LogTrackQuests = RatConfig.LogTracking.TrackQuests;
@@ -343,6 +351,7 @@ internal class SettingsVM : INotifyPropertyChanged {
 		RatConfig.IconScan.Enable = EnableIconScan;
 		RatConfig.IconScan.ScanRotatedIcons = ScanRotatedIcons;
 		RatConfig.IconScan.UseCachedIcons = UseCachedIcons;
+		RatConfig.IconScan.UseTarkovVision = IsIconScanUseTarkovVision;
 		RatConfig.IconScan.Hotkey = IconScanHotkey;
 
 		RatConfig.ToolTip.Duration = ToolTipMilli;
@@ -408,6 +417,9 @@ internal class SettingsVM : INotifyPropertyChanged {
 		RatConfig.FloatingTooltip.ShowHideoutInfo = IsFloatingTooltipShowHideoutInfo;
 		RatConfig.FloatingTooltip.ShowBarterInfo = IsFloatingTooltipShowBarterInfo;
 		RatConfig.FloatingTooltip.ShowCraftsInfo = IsFloatingTooltipShowCraftsInfo;
+		RatConfig.FloatingTooltip.ShowOverlayPrice = IsFloatingTooltipShowOverlayPrice;
+		RatConfig.FloatingTooltip.ShowOverlayTaskBadge = IsFloatingTooltipShowOverlayTaskBadge;
+		RatConfig.FloatingTooltip.ShowOverlayHideoutBadge = IsFloatingTooltipShowOverlayHideoutBadge;
 
 		RatConfig.LogTracking.Enable = EnableLogTracking;
 		RatConfig.LogTracking.TrackQuests = LogTrackQuests;

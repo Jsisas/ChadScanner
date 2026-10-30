@@ -67,6 +67,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<None Include="Native\*.dll" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<!-- Clear the SDK's implicit Content globs (*.json, *.png, ...) for Data\
 		     so the explicit <Content Include="Data\**"> below is the only source
 		     and cannot collide with a newly added file such as manifest.json. -->

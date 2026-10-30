@@ -368,5 +368,12 @@
   "LogTrackingHistoryFailed": "Não foi possível ler os logs anteriores: {0}",
   "LogTrackingQuestAccepted": "Missão aceite: {0}",
   "LogTrackingQuestFinished": "Missão concluída: {0}",
-  "LogTrackingQuestFailed": "Missão falhou: {0}"
+  "LogTrackingQuestFailed": "Missão falhou: {0}",
+  "UseTarkovVision": "Use tarkov-vision",
+  "UseTarkovVisionHint": "Rust recognition (DINOv2 + OCR). Off = RatEye template matching.",
+  "OverlayPrice": "Overlay: show price",
+  "OverlayTaskBadge": "Overlay: show task badge",
+  "OverlayHideoutBadge": "Overlay: show hideout badge",
+  "HideoutProgress": "Hideout",
+  "HideoutProgressHint": "Tarkov does not log hideout builds; set your built levels here."
 }

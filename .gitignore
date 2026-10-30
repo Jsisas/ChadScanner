@@ -5,6 +5,10 @@ temp/
 # Static icon data
 RatScanner/[Dd]ata/*
 
+# tarkov-vision native library and data (built by tools/build-tv.ps1)
+RatScanner/Native/
+RatScanner/Data/tv/
+
 # publish folder
 publish/
 

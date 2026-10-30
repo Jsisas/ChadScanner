@@ -13,17 +13,22 @@ public class ItemIconScan : ItemScan {
 
 	private readonly Vector2 _toolTipPosition;
 
-	public ItemIconScan(Icon icon, Vector2 toolTipPosition, int duration) {
+	public ItemIconScan(Icon icon, Vector2 toolTipPosition, int duration) : this(icon, LookupItem(icon.Item.Id), icon.DetectionConfidence, toolTipPosition, duration) { }
+
+	public ItemIconScan(Icon icon, RatScanner.TarkovDev.Json.Item item, float confidence, Vector2 toolTipPosition, int duration) {
 		Icon = icon;
-		var iconItem = icon.Item;
-		Item = TarkovDevAPI.GetItems().FirstOrDefault(item => item.Id == iconItem.Id) ?? throw new Exception($"Unknown item: {icon.Item.Id}");
+		Item = item;
 		ItemExtraInfo = icon.ItemExtraInfo;
-		Confidence = icon.DetectionConfidence;
+		Confidence = confidence;
 		Rotated = icon.Rotated;
 		IconPath = icon.IconPath;
 
 		_toolTipPosition = toolTipPosition;
 		DissapearAt = DateTimeOffset.Now.ToUnixTimeMilliseconds() + duration;
+	}
+
+	private static RatScanner.TarkovDev.Json.Item LookupItem(string id) {
+		return TarkovDevAPI.GetItems().FirstOrDefault(item => item.Id == id) ?? throw new Exception($"Unknown item: {id}");
 	}
 
 	public override Vector2 GetToolTipPosition() {

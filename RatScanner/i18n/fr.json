@@ -368,5 +368,12 @@
   "LogTrackingHistoryFailed": "Impossible de lire les anciens journaux : {0}",
   "LogTrackingQuestAccepted": "Quete acceptee : {0}",
   "LogTrackingQuestFinished": "Quete terminee : {0}",
-  "LogTrackingQuestFailed": "Quete echouee : {0}"
+  "LogTrackingQuestFailed": "Quete echouee : {0}",
+  "UseTarkovVision": "Use tarkov-vision",
+  "UseTarkovVisionHint": "Rust recognition (DINOv2 + OCR). Off = RatEye template matching.",
+  "OverlayPrice": "Overlay: show price",
+  "OverlayTaskBadge": "Overlay: show task badge",
+  "OverlayHideoutBadge": "Overlay: show hideout badge",
+  "HideoutProgress": "Hideout",
+  "HideoutProgressHint": "Tarkov does not log hideout builds; set your built levels here."
 }

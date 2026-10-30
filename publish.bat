@@ -4,9 +4,14 @@
 echo Removing old publish folder...
 rmdir /s /q publish
 
+:: Build native tarkov-vision library and data
+echo Building tarkov-vision...
+powershell -ExecutionPolicy Bypass -File tools\build-tv.ps1
+if %ERRORLEVEL% neq 0 exit /b 1
+
 :: Publish
 echo Publishing RatScanner project...
-dotnet publish RatScanner/RatScanner.csproj -c Release -o publish --runtime win-x64 -p:PublishSingleFile=true --self-contained true
+dotnet publish RatScanner/RatScanner.csproj -c Release -o publish --runtime win-x64 -p:PublishSingleFile=true --self-contained true -p:IncludeNativeLibrariesForSelfExtract=true
 
 :: Download Updater
 echo Adding latest updater build...

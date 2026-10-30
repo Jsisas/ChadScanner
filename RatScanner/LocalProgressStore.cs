@@ -29,6 +29,9 @@ public class LocalProgressStore {
     /// <summary>Per game mode, task id to its completion record.</summary>
     private readonly Dictionary<GameMode, Dictionary<string, TaskProgress>> _tasks = new();
 
+    /// <summary>Per game mode, hideout station id to the highest level the player has built.</summary>
+    private readonly Dictionary<GameMode, Dictionary<string, int>> _hideout = new();
+
     /// <summary>Per game mode, the profile fields the player set by hand.</summary>
     private readonly Dictionary<GameMode, Profile> _profiles = new();
 
@@ -151,7 +154,51 @@ public class LocalProgressStore {
             })];
         }
 
+        if (_hideout.TryGetValue(mode, out var hideout)) {
+            // A built level implies every level below it, so each station level
+            // up to the stored one is reported as a completed module.
+            progress.HideoutModules = [.. TarkovDevAPI.GetHideoutStations()
+                .Where(s => hideout.ContainsKey(s.Id))
+                .SelectMany(s => s.Levels.Where(l => l.Level <= hideout[s.Id]))
+                .Select(l => new Progress { Id = l.Id, Complete = true })];
+        }
+
         return progress;
+    }
+
+    /// <summary>The built level of a hideout station in the current game mode, 0 when none.</summary>
+    public int GetHideoutLevel(string stationId) {
+        lock (Gate) {
+            return _hideout.TryGetValue(RatConfig.GameMode, out var levels) && levels.TryGetValue(stationId, out var level) ? level : 0;
+        }
+    }
+
+    /// <summary>
+    /// Records the built level of a hideout station in the current game mode.
+    /// Tarkov does not log hideout builds, so the player sets this by hand.
+    /// Level 0 removes the entry.
+    /// </summary>
+    public void SetHideoutLevel(string stationId, int level) {
+        if (string.IsNullOrEmpty(stationId)) return;
+
+        lock (Gate) {
+            var levels = HideoutFor(RatConfig.GameMode);
+            if (level <= 0) _ = levels.Remove(stationId);
+            else levels[stationId] = level;
+
+            Persist();
+        }
+
+        RaiseChanged();
+    }
+
+    private Dictionary<string, int> HideoutFor(GameMode mode) {
+        if (!_hideout.TryGetValue(mode, out var value)) {
+            value = [];
+            _hideout[mode] = value;
+        }
+
+        return value;
     }
 
     /// <summary>
@@ -231,6 +278,7 @@ public class LocalProgressStore {
             foreach (var mode in modes) {
                 removed |= _objectives.Remove(mode);
                 removed |= _tasks.Remove(mode);
+                removed |= _hideout.Remove(mode);
             }
 
             if (removed) Persist();
@@ -411,6 +459,14 @@ public class LocalProgressStore {
                     }
                 }
 
+                if (data["hideout"] is JObject hideoutNode) {
+                    var levels = HideoutFor(mode);
+                    foreach (var (id, node) in hideoutNode) {
+                        var level = (int?)node ?? 0;
+                        if (level > 0) levels[id] = level;
+                    }
+                }
+
                 if (data["taskObjectives"] is JObject objectiveNode) {
                     var objectives = MapFor(_objectives, mode);
                     foreach (var (id, node) in objectiveNode) {
@@ -503,6 +559,12 @@ public class LocalProgressStore {
                     data["taskCompletions"] = node;
                 } else {
                     data["taskCompletions"] = new JObject();
+                }
+
+                if (_hideout.TryGetValue(mode, out var hideout) && hideout.Count > 0) {
+                    var node = new JObject();
+                    foreach (var (id, level) in hideout) node[id] = level;
+                    data["hideout"] = node;
                 }
 
                 root[section] = data;

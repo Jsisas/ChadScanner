@@ -66,6 +66,13 @@
                        CheckedChanged="@((bool v) => { SettingsVM.UseCachedIcons = v; SettingsVM.MarkDirty(); })"
                        Color="Color.Primary" Dense="true" />
         </SettingsRow>
+
+        <SettingsRow Label="@Localizer["UseTarkovVision"]" SubLabel="@Localizer["UseTarkovVisionHint"]"
+                     Disabled="@(!SettingsVM.EnableIconScan)">
+            <MudSwitch T="bool" Checked="@SettingsVM.IsIconScanUseTarkovVision"
+                       CheckedChanged="@((bool v) => { SettingsVM.IsIconScanUseTarkovVision = v; SettingsVM.MarkDirty(); })"
+                       Color="Color.Primary" Dense="true" />
+        </SettingsRow>
     </SettingsCard>
 </div>
 

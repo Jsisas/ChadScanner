@@ -184,6 +184,22 @@
                             }
                         </MudTabs>
                     </SettingsCard>
+
+                    @* Tarkov does not log hideout builds, so the built levels are set by hand. *@
+                    <SettingsCard Title="@Localizer["HideoutProgress"]" Subtitle="@Localizer["HideoutProgressHint"]">
+                        @foreach (var station in HideoutStations) {
+                            var stationId = station.Id;
+                            <SettingsRow Label="@station.Name">
+                                <MudSelect T="int" Value="@GetHideoutLevel(stationId)"
+                                           ValueChanged="@((int v) => SetHideoutLevel(stationId, v))"
+                                           Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width: 110px;">
+                                    @for (var level = 0; level <= station.Levels.Max(l => l.Level); level++) {
+                                        <MudSelectItem T="int" Value="@level">@level</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </SettingsRow>
+                        }
+                    </SettingsCard>
                 }
 
                 <SettingsCard Title="@Localizer["LogTrackingTitle"]" Subtitle="@Localizer["LogTrackingDesc"]">
@@ -517,6 +533,16 @@
 
         _traderTaskCounts[key] = counts;
         return counts;
+    }
+
+    private IEnumerable<HideoutStation> HideoutStations =>
+        TarkovDevAPI.GetHideoutStations().Where(s => s.Levels.Count > 0).OrderBy(s => s.Name);
+
+    private int GetHideoutLevel(string stationId) =>
+        RatScannerMain.Instance?.LocalProgress?.GetHideoutLevel(stationId) ?? 0;
+
+    private void SetHideoutLevel(string stationId, int level) {
+        RatScannerMain.Instance?.LocalProgress?.SetHideoutLevel(stationId, level);
     }
 
     /// <summary>

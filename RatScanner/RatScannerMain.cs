@@ -59,6 +59,7 @@ public class RatScannerMain : INotifyPropertyChanged {
 	public LocalProgressStore LocalProgress;
 
 	internal RatEyeEngine RatEyeEngine;
+	internal TarkovVision? Vision;
 
 	public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -163,6 +164,9 @@ public class RatScannerMain : INotifyPropertyChanged {
 
 		Logger.LogInfo("Initializing RatEye...");
 		SetupRatEye();
+
+		Logger.LogInfo("Initializing tarkov-vision...");
+		Vision = TarkovVision.TryOpen(Path.Combine(RatConfig.Paths.Data, "tv"));
 
 		new Thread(() => {
 			Thread.Sleep(1000);
@@ -516,10 +520,47 @@ public class RatScannerMain : INotifyPropertyChanged {
 			toolTipPosition += icon.Position + icon.ItemPosition;
 			toolTipPosition -= new Vector2(RatConfig.IconScan.ScanWidth, RatConfig.IconScan.ScanHeight) / 2;
 
-			ItemIconScan tempIconScan = new(icon, toolTipPosition, RatConfig.ToolTip.Duration);
+			ItemIconScan? visionScan = RatConfig.IconScan.UseTarkovVision ? IdentifyWithVision(screenshot, icon, toolTipPosition) : null;
+			ItemIconScan tempIconScan = visionScan ?? new(icon, toolTipPosition, RatConfig.ToolTip.Duration);
 
 			ItemScans.Enqueue(tempIconScan);
 			RefreshOverlay();
+		}
+	}
+
+	/// <summary>
+	/// Re-identifies the icon RatEye located using tarkov-vision.
+	/// </summary>
+	/// <returns>The scan, or <see langword="null"/> when tarkov-vision is unavailable or has no known match</returns>
+	private ItemIconScan? IdentifyWithVision(Bitmap screenshot, RatEye.Processing.Icon icon, Vector2 toolTipPosition) {
+		var vision = Vision;
+		if (vision == null) return null;
+
+		try {
+			// Same padding rule as tarkov-vision's dataset::padded_crop
+			var pitch = 63f * RatEyeEngine.Config.ProcessingConfig.Scale;
+			var slotsW = Math.Max(1, (int)Math.Round(icon.Size.X / pitch));
+			var slotsH = Math.Max(1, (int)Math.Round(icon.Size.Y / pitch));
+
+			var pad = (int)Math.Round(pitch / 8f);
+			var x0 = Math.Max(0, icon.Position.X - pad);
+			var y0 = Math.Max(0, icon.Position.Y - pad);
+			var x1 = Math.Min(screenshot.Width, icon.Position.X + icon.Size.X + pad);
+			var y1 = Math.Min(screenshot.Height, icon.Position.Y + icon.Size.Y + pad);
+			if (x1 <= x0 || y1 <= y0) return null;
+
+			using var crop = screenshot.Clone(new Rectangle(x0, y0, x1 - x0, y1 - y0), PixelFormat.Format24bppRgb);
+			var candidates = vision.Identify(crop, slotsW, slotsH);
+			if (candidates.Length == 0) return null;
+
+			var (id, score) = candidates[0];
+			var item = TarkovDevAPI.GetItems().FirstOrDefault(i => i.Id == id);
+			if (item == null) return null;
+
+			return new ItemIconScan(icon, item, score, toolTipPosition, RatConfig.ToolTip.Duration);
+		} catch (Exception e) {
+			Logger.LogWarning("tarkov-vision scan failed, falling back to RatEye", e);
+			return null;
 		}
 	}
 
