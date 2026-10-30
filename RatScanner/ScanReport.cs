@@ -35,6 +35,8 @@ internal sealed class ScanReport {
 	public float RatEyeConfidence { get; set; }
 	public string? RatEyeItemId { get; set; }
 	public string? RatEyeItemShortName { get; set; }
+	/// <summary>Exception message when RatEye threw while locating the icon.</summary>
+	public string? RatEyeError { get; set; }
 
 	/// <summary>"grid" when ChadVision found the cell from the stash grid lines, else RatEye's box was used.</summary>
 	public string? CellSource { get; set; }
