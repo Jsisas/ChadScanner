@@ -14,10 +14,11 @@ use windows::Win32::Graphics::Gdi::{
     AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, VK_F12};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostMessageW, PostQuitMessage, RegisterClassW,
     SetTimer, SetWindowPos, ShowWindow, TranslateMessage, UpdateLayeredWindow, HWND_TOPMOST, MSG, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_APP, WM_TIMER, WNDCLASSW, WS_EX_LAYERED,
+    SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA, WM_APP, WM_HOTKEY, WM_TIMER, WNDCLASSW, WS_EX_LAYERED,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
@@ -57,9 +58,12 @@ impl Ui {
 pub trait TrayActions {
     fn open_settings(&self);
     fn set_paused(&self, paused: bool);
+    /// Ctrl+Shift+F12.
+    fn debug_report(&self);
 }
 
 const TOAST_SECONDS: f32 = 4.0;
+const DEBUG_HOTKEY: i32 = 1;
 /// Cursor travel that dismisses the card.
 const LEAVE_PX: i32 = 40;
 
@@ -207,6 +211,10 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions) -> anyhow::Res
         let mut toast = Layered::create()?;
         ui.hwnd.store(card.hwnd.0 as isize, Ordering::Release);
         SetTimer(card.hwnd, 1, 50, None);
+        // Thread hotkey (no window): WM_HOTKEY arrives with a null hwnd.
+        if let Err(e) = RegisterHotKey(None, DEBUG_HOTKEY, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_F12.0 as u32) {
+            log::warn!("Ctrl+Shift+F12 unavailable (taken by another program?): {e}");
+        }
 
         let settings = MenuItem::new("Settings", true, None);
         let pause = CheckMenuItem::new("Pause scanning", true, false, None);
@@ -224,6 +232,10 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions) -> anyhow::Res
         let mut toast_until: Option<Instant> = None;
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            if msg.message == WM_HOTKEY && msg.wParam.0 == DEBUG_HOTKEY as usize {
+                actions.debug_report();
+                continue;
+            }
             if msg.hwnd == card.hwnd && msg.message == WM_APP {
                 while let Ok(c) = rx.try_recv() {
                     match c {

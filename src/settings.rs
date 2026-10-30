@@ -363,6 +363,14 @@ impl SettingsApp {
                 }
             });
         });
+        section(ui, "Debug report", |ui| {
+            ui.label("Press Ctrl + Shift + F12 right after a scan that went wrong.");
+            hint(ui, "Saves the scan's screenshot, the candidates and why it was accepted or rejected, the screen now and the log tail.");
+            if ui.button("Open reports folder").clicked() {
+                let _ = std::fs::create_dir_all(self.paths.reports());
+                let _ = std::process::Command::new("explorer.exe").arg(self.paths.reports()).spawn();
+            }
+        });
     }
 }
 

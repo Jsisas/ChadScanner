@@ -30,6 +30,13 @@ Needs rustup, `lld` (`lld-link`), curl and unzip; installs the Windows target an
 - Files: `%APPDATA%\ChadOverlay\` — `config.json`, `progress.json`, `pending.json` (TarkovTracker writes
   waiting for a retry), `logstate.json` (EFT log read position), `log.txt`.
 
+## Debug report
+
+Press **Ctrl + Shift + F12** right after a scan that went wrong. `%APPDATA%\ChadOverlay\reports\report-<time>\`
+gets `scan.png` (what the scan captured), `report.json` (cursor, scale, grid cell, candidates with
+scores, why it was accepted or rejected), `now.png` (the screen around the cursor now) and
+`log-tail.txt`.
+
 ## Tests
 
 `cargo test` runs the portable modules (data parsing, needs, progress store, log parsing, card) on Linux.

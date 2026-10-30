@@ -18,6 +18,16 @@ const ACCEPT: f32 = 0.55;
 const MARGIN: f32 = 0.02;
 const REJECT_SECONDS: f32 = 1.5;
 
+/// What a scan saw and decided; saved by the debug report.
+struct LastScan {
+    time: SystemTime,
+    req: ScanRequest,
+    shot: Option<win::capture::Shot>,
+    candidates: Vec<(String, f32)>,
+    outcome: String,
+    ms: u128,
+}
+
 pub struct App {
     pub paths: Paths,
     pub cfg: RwLock<Config>,
@@ -30,6 +40,8 @@ pub struct App {
     font: card::Fonts,
     paused: AtomicBool,
     settings: Mutex<Option<Child>>,
+    /// The most recent scan, for Ctrl+Shift+F12 debug reports.
+    last_scan: Mutex<Option<LastScan>>,
     /// Serialises mode switches.
     switch: Mutex<()>,
 }
@@ -57,6 +69,7 @@ impl App {
                 font,
                 paused: AtomicBool::new(false),
                 settings: Mutex::new(None),
+                last_scan: Mutex::new(None),
                 switch: Mutex::new(()),
             }
         });
@@ -98,9 +111,10 @@ impl App {
                 (l.clone(), Some(l))
             }
         };
+        let using = if local.is_some() { "local file" } else { "TarkovTracker" };
+        log::info!("progress: {using} ({})", cfg.mode.label());
         *self.progress.write().unwrap() = src;
         *self.local.write().unwrap() = local;
-        log::info!("progress: {:?} {}", cfg.source, cfg.mode.label());
     }
 
     fn progress(&self) -> Arc<dyn ProgressSource> {
@@ -165,27 +179,38 @@ impl App {
 
     pub fn scan_worker(self: Arc<Self>, rx: Receiver<ScanRequest>) {
         for req in rx {
-            if self.paused.load(Ordering::Relaxed) || !win::eft_in_foreground() {
-                continue;
-            }
-            self.ui.send(ui::Cmd::HideCard);
             let started = std::time::Instant::now();
-            if let Err(e) = self.scan(req) {
-                log::warn!("scan failed: {e:#}");
-            }
-            log::info!("scan at ({},{}) took {} ms", req.x, req.y, started.elapsed().as_millis());
+            let (shot, candidates, outcome) = if self.paused.load(Ordering::Relaxed) {
+                (None, Vec::new(), "ignored: scanning paused".to_owned())
+            } else if !win::eft_in_foreground() {
+                (None, Vec::new(), "ignored: EscapeFromTarkov.exe was not the foreground window".to_owned())
+            } else {
+                self.ui.send(ui::Cmd::HideCard);
+                match self.scan(req) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        log::warn!("scan failed: {e:#}");
+                        (None, Vec::new(), format!("error: {e:#}"))
+                    }
+                }
+            };
+            let ms = started.elapsed().as_millis();
+            log::info!("scan at ({},{}) took {ms} ms: {outcome}", req.x, req.y);
+            *self.last_scan.lock().unwrap() =
+                Some(LastScan { time: SystemTime::now(), req, shot, candidates, outcome, ms });
         }
     }
 
-    fn scan(&self, req: ScanRequest) -> anyhow::Result<()> {
+    /// Shows the card (or why not); returns what the debug report needs.
+    fn scan(&self, req: ScanRequest) -> anyhow::Result<(Option<win::capture::Shot>, Vec<(String, f32)>, String)> {
         let at = (req.x, req.y);
         let Some(engine) = self.engine.get() else {
             self.show_card(&card::message("…", "recognition still loading", card::GREY), at, Some(REJECT_SECONDS));
-            return Ok(());
+            return Ok((None, Vec::new(), "rejected: recognition still loading".into()));
         };
         let Some(cat) = self.store.read().unwrap().get() else {
             self.show_card(&card::message("?", "no item data yet", card::GREY), at, Some(REJECT_SECONDS));
-            return Ok(());
+            return Ok((None, Vec::new(), "rejected: no item data yet".into()));
         };
         let shot = win::capture::around(req.x, req.y)?;
         let cands = engine.identify_at(&shot.image, shot.mouse, shot.scale, 5);
@@ -195,18 +220,91 @@ impl App {
         let item = cands.first().filter(|_| top >= ACCEPT && top - second >= MARGIN).and_then(|(id, _)| cat.items.get(id));
         let Some(item) = item else {
             self.show_card(&card::message("?", "no confident match", card::GREY), at, Some(REJECT_SECONDS));
-            return Ok(());
+            let why = match cands.first() {
+                None => "rejected: no candidates (no grid cell found and tooltip name below 0.8)".to_owned(),
+                Some(_) if top < ACCEPT => format!("rejected: top score {top:.3} < {ACCEPT}"),
+                Some(_) if top - second < MARGIN => format!("rejected: top {top:.3} beats runner-up {second:.3} by < {MARGIN}"),
+                Some((id, _)) => format!("rejected: {id} not in tarkov.dev data"),
+            };
+            return Ok((Some(shot), cands, why));
         };
         let (opts, seconds) = {
             let c = self.cfg.read().unwrap();
             (card::CardOptions::from_config(&c), c.tooltip_seconds)
         };
         let src = self.progress();
-        // Picks up counts just marked on tarkovtracker.org (cheap: ETag, rate-limited).
+        // Picks up counts just marked on tarkovtracker.org (ETag, rate-limited).
         src.refresh_if_stale();
         let c = card::item_card(&cat, item, top, &src.snapshot(), &opts);
         self.show_card(&c, at, Some(seconds).filter(|s| *s > 0.0));
-        Ok(())
+        let shown = format!("shown: {} ({})", item.short_name, item.id);
+        Ok((Some(shot), cands, shown))
+    }
+
+    /// Ctrl+Shift+F12: writes the last scan (screenshot, candidates, decision), the screen now
+    /// and the log tail to `%APPDATA%\ChadOverlay\reports\<time>\`.
+    pub fn debug_report(self: &Arc<Self>) {
+        let app = self.clone();
+        let (x, y) = win::cursor_pos();
+        std::thread::spawn(move || match app.write_report(x, y) {
+            Ok(dir) => {
+                log::info!("debug report saved to {}", dir.display());
+                app.toast("Debug report saved", &dir.file_name().unwrap_or_default().to_string_lossy(), card::GREEN);
+            }
+            Err(e) => {
+                log::warn!("debug report failed: {e:#}");
+                app.toast("Debug report failed", "see log.txt", card::RED);
+            }
+        });
+    }
+
+    fn write_report(&self, x: i32, y: i32) -> anyhow::Result<std::path::PathBuf> {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
+        let dir = self.paths.reports().join(format!("report-{stamp}"));
+        std::fs::create_dir_all(&dir)?;
+        let cat = self.store.read().unwrap().get();
+        let name = |id: &str| cat.as_ref().and_then(|c| c.items.get(id)).map(|i| i.short_name.clone());
+        let cfg = self.cfg.read().unwrap().clone();
+
+        let last = self.last_scan.lock().unwrap();
+        let scan = last.as_ref().map(|s| {
+            let cell = s.shot.as_ref().and_then(|sh| chadvision::grid::locate_cell(&sh.image, sh.mouse, sh.scale, (1, 1)));
+            serde_json::json!({
+                "secondsAgo": s.time.elapsed().map(|d| d.as_secs()).unwrap_or(0),
+                "mouseScreen": [s.req.x, s.req.y],
+                "mouseInImage": s.shot.as_ref().map(|sh| [sh.mouse.0, sh.mouse.1]),
+                "scale": s.shot.as_ref().map(|sh| sh.scale),
+                "imageSize": s.shot.as_ref().map(|sh| [sh.image.width(), sh.image.height()]),
+                "gridCell": cell.map(|c| serde_json::json!({"x": c.x, "y": c.y, "w": c.w, "h": c.h, "slots": [c.slots.0, c.slots.1]})),
+                "candidates": s.candidates.iter().map(|(id, sc)| serde_json::json!({"id": id, "shortName": name(id), "score": sc})).collect::<Vec<_>>(),
+                "outcome": s.outcome,
+                "ms": s.ms,
+            })
+        });
+        if let Some(sh) = last.as_ref().and_then(|s| s.shot.as_ref()) {
+            sh.image.save(dir.join("scan.png"))?;
+        }
+        drop(last);
+        // What is on screen now, around the cursor (the card itself is not captured).
+        if let Ok(now) = win::capture::around(x, y) {
+            now.image.save(dir.join("now.png"))?;
+        }
+        let report = serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "mode": cfg.mode.key(),
+            "source": format!("{:?}", cfg.source),
+            "hotkey": cfg.hotkey.label(),
+            "accept": {"minScore": ACCEPT, "minMargin": MARGIN},
+            "recognitionLoaded": self.engine.get().is_some(),
+            "catalogItems": cat.as_ref().map(|c| c.items.len()),
+            "cursorNow": [x, y],
+            "lastScan": scan,
+        });
+        std::fs::write(dir.join("report.json"), serde_json::to_string_pretty(&report)?)?;
+        let log = std::fs::read_to_string(self.paths.log()).unwrap_or_default();
+        let tail: Vec<&str> = log.lines().rev().take(300).collect();
+        std::fs::write(dir.join("log-tail.txt"), tail.into_iter().rev().collect::<Vec<_>>().join("\n"))?;
+        Ok(dir)
     }
 
     // ------------------------------------------------------------ EFT logs
@@ -371,6 +469,10 @@ impl ui::TrayActions for Arc<App> {
             Ok(c) => *child = Some(c),
             Err(e) => log::error!("opening Settings: {e}"),
         }
+    }
+
+    fn debug_report(&self) {
+        App::debug_report(self);
     }
 
     fn set_paused(&self, paused: bool) {

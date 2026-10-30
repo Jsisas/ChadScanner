@@ -259,6 +259,9 @@ impl Paths {
     pub fn logstate(&self) -> PathBuf {
         self.appdata.join("logstate.json")
     }
+    pub fn reports(&self) -> PathBuf {
+        self.appdata.join("reports")
+    }
     pub fn cache(&self) -> PathBuf {
         self.appdata.join("cache")
     }
