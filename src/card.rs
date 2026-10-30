@@ -35,8 +35,6 @@ pub struct Rgb(pub u8, pub u8, pub u8);
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Style {
     Plain,
-    /// Tinted band behind the line (the verdict).
-    Band,
     /// Small uppercase group heading.
     Label,
     /// Thin separator; text is ignored.
@@ -166,47 +164,37 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardO
     let quest_total: u32 = q.tasks.iter().map(|t| t.count).sum();
     let hideout_total: u32 = hideout.iter().map(|h| h.remaining).sum();
     let total = quest_total + hideout_total;
-    // KEEP counts only quests inside the goal.
+    // Border colour: needed now (quest or buildable upgrade) > Kappa > later > outside goal > price.
     let goal_tasks = || q.tasks.iter().filter(|t| in_goal(t, o.goal));
-    let current: u32 = goal_tasks().filter(|t| t.is_current()).map(|t| t.count).sum();
-    let current_fir = goal_tasks().any(|t| t.is_current() && t.fir > 0);
-    let buildable: u32 = hideout.iter().filter(|h| h.buildable).map(|h| h.remaining).sum();
-    let kappa: u32 = q.tasks.iter().filter(|t| t.kappa).map(|t| t.count).sum();
-    let keep_later: u32 = goal_tasks().map(|t| t.count).sum::<u32>() + hideout_total;
+    let now = goal_tasks().any(|t| t.is_current()) || hideout.iter().any(|h| h.buildable);
+    let kappa = o.goal == Goal::None && q.tasks.iter().any(|t| t.kappa);
+    let later = goal_tasks().next().is_some() || !hideout.is_empty();
     let (barters, crafts) = needs::recipes_using(cat, &item.id);
     let best = item.best_trader();
     let slots = (item.width * item.height).max(1);
-
-    let (verdict, why, color) = if current > 0 {
-        let fir = if current_fir { "  FIR" } else { "" };
-        (format!("KEEP {current}×{fir}"), "for a task you have now".to_owned(), AMBER)
-    } else if buildable > 0 {
-        (format!("KEEP {buildable}×"), "for a buildable upgrade".to_owned(), AMBER)
-    } else if o.goal == Goal::None && kappa > 0 {
-        (format!("KEEP {kappa}×"), "for Kappa".to_owned(), PURPLE)
-    } else if keep_later > 0 {
-        (format!("KEEP {keep_later}×"), "for later".to_owned(), LATER)
+    let color = if now {
+        AMBER
+    } else if kappa {
+        PURPLE
+    } else if later {
+        LATER
     } else if total > 0 {
-        ("NOT NEEDED".to_owned(), format!("{total}× outside {}", o.goal.label()), GREY)
+        GREY
     } else {
         // Items without a flea price are judged by their best trader offer.
         let per_slot = item.price_per_slot().or(best.map(|b| b.price_rub / slots)).unwrap_or(0);
-        let why = if per_slot > 0 { format!("{} ₽/slot", rub(per_slot)) } else { String::new() };
         if per_slot >= 30_000 {
-            ("VALUABLE".into(), why, GREEN)
+            GREEN
         } else if per_slot >= 10_000 {
-            ("OK".into(), why, TEXT)
+            TEXT
         } else {
-            ("LOW".into(), why, GREY)
+            GREY
         }
     };
 
     let title = if score < 0.7 { format!("{} ?", item.short_name) } else { item.short_name.clone() };
     let needed = if total > 0 { format!("{total}× needed") } else { String::new() };
-    let mut lines = vec![
-        line(title, TITLE, TEXT).right(needed, MUTED),
-        line(verdict, HEADLINE, color).style(Style::Band).right(why, color),
-    ];
+    let mut lines = vec![line(title, TITLE, TEXT).right(needed, MUTED)];
 
     // QUESTS and HIDEOUT; quests outside the goal last. Each row says how far away it is.
     let other = format!("NOT {}", o.goal.label().to_uppercase());
@@ -427,7 +415,6 @@ pub fn render(card: &Card, fonts: &Fonts, scale: f32) -> Pixmap {
     let width = (WIDTH * s).round();
     let left = (PAD + BORDER) * s;
     let inner = width - 2.0 * left;
-    let band_pad = 5.0 * s;
 
     struct Laid {
         text: String,
@@ -447,7 +434,6 @@ pub fn render(card: &Card, fonts: &Fonts, scale: f32) -> Pixmap {
         let (top_extra, height) = match l.style {
             Style::Rule => (2.0 * s, 1.0 * s + 4.0 * s),
             Style::Label => (4.0 * s, font.as_scaled(PxScale::from(size)).height()),
-            Style::Band => (2.0 * s, font.as_scaled(PxScale::from(size)).height() + 2.0 * band_pad),
             Style::Plain => (0.0, font.as_scaled(PxScale::from(size)).height()),
         };
         // Right text is drawn in regular weight at most at the line's size.
@@ -457,7 +443,7 @@ pub fn render(card: &Card, fonts: &Fonts, scale: f32) -> Pixmap {
             let w = text_width(&fonts.regular, rsize, &t);
             (t, *c, rsize, w)
         });
-        let avail = inner - right.as_ref().map_or(0.0, |r| r.3 + 12.0 * s) - if l.style == Style::Band { 2.0 * band_pad } else { 0.0 };
+        let avail = inner - right.as_ref().map_or(0.0, |r| r.3 + 12.0 * s);
         let text = if l.style == Style::Rule { String::new() } else { fit(&font, size, displayable(&font, &l.text), avail) };
         y += top_extra;
         laid.push(Laid { text, right: right.map(|(t, c, rs, _)| (t, c, rs)), size, font, color: l.color, style: l.style, top: y, height });
@@ -483,20 +469,14 @@ pub fn render(card: &Card, fonts: &Fonts, scale: f32) -> Pixmap {
                 pix.fill_rect(r, &paint, Transform::identity(), None);
                 continue;
             }
-            Style::Band => {
-                paint.set_color(Color::from_rgba8(l.color.0, l.color.1, l.color.2, 46));
-                let r = Rect::from_xywh(left - 4.0 * s, l.top, inner + 8.0 * s, l.height).unwrap();
-                pix.fill_rect(r, &paint, Transform::identity(), None);
-            }
             Style::Label | Style::Plain => {}
         }
-        let pad = if l.style == Style::Band { band_pad } else { 0.0 };
         let ascent = l.font.as_scaled(PxScale::from(l.size)).ascent();
-        let baseline = l.top + pad + ascent;
-        draw_text(&mut pix, &l.font, l.size, &l.text, left + pad, baseline, l.color);
+        let baseline = l.top + ascent;
+        draw_text(&mut pix, &l.font, l.size, &l.text, left, baseline, l.color);
         if let Some((t, c, rs)) = &l.right {
             let w = text_width(&fonts.regular, *rs, t);
-            draw_text(&mut pix, &fonts.regular, *rs, t, left + inner - pad - w, baseline, *c);
+            draw_text(&mut pix, &fonts.regular, *rs, t, left + inner - w, baseline, *c);
         }
     }
     pix
@@ -561,11 +541,11 @@ mod tests {
     }
 
     #[test]
-    fn price_verdict_without_needs() {
+    fn no_needs_shows_price_only() {
         let cat = Catalog::default();
         let item = Item { id: "i".into(), short_name: "PS".into(), width: 1, height: 1, avg24h: Some(50_000), ..Default::default() };
         let c = item_card(&cat, &item, 0.6, &Progress::default(), &OPTS);
-        assert_eq!(show(&c)[..2], ["PS ?", "VALUABLE | 50\u{2009}000 ₽/slot"]);
+        assert_eq!(show(&c), ["PS ?", "Flea 50\u{2009}000 ₽"]);
         assert_eq!(c.border, GREEN);
     }
 
@@ -590,7 +570,6 @@ mod tests {
             show(&c),
             [
                 "Shus | 20× needed",
-                "KEEP 2× | for a buildable upgrade",
                 "QUESTS",
                 "1×  Kappa task | Lv 30",
                 "4×  Side task | FIR · 2 quests",
@@ -608,7 +587,7 @@ mod tests {
         let p = Progress { level: Some(16), ..Default::default() };
         let o = CardOptions { smart: false, max_rows: 3, ..OPTS };
         assert_eq!(
-            show(&item_card(&cat, &item, 0.9, &p, &o))[2..],
+            show(&item_card(&cat, &item, 0.9, &p, &o))[1..],
             ["QUESTS", "4×  Side task | FIR · now", "1×  Kappa task | Lv 30", "HIDEOUT", "8×  Stash 2 | 1 upgrade", "+7× in 2 more"]
         );
     }
@@ -630,7 +609,7 @@ mod tests {
         let o = CardOptions { goal: Goal::Kappa, hideout: false, ..OPTS };
         assert_eq!(
             show(&item_card(&cat, &item, 0.9, &p, &o))[1..],
-            ["KEEP 1× | for a task you have now", "QUESTS", "1×  Kappa task | now", "NOT KAPPA", "4×  Side task | FIR · now"]
+            ["QUESTS", "1×  Kappa task | now", "NOT KAPPA", "4×  Side task | FIR · now"]
         );
     }
 }
