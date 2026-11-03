@@ -6,9 +6,11 @@
   const toast = (title, body, warn) => post({ toast: { title, body, warn } });
   const log = (text) => post({ log: text });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  async function until(fn, ms) {
+  // `g` is the generation of the scan that started the wait; a newer scan (higher `gen`) aborts it with null.
+  async function until(fn, ms, g) {
     const end = Date.now() + ms;
     for (;;) {
+      if (g != null && g !== gen) return null;
       const v = fn();
       if (v || Date.now() > end) return v || null;
       await sleep(100);
@@ -26,6 +28,7 @@
     document.querySelector(CARD + ' img[src*="/' + id + '-"]')?.closest(CARD) ||
     [...document.querySelectorAll(CARD)].find((c) => c.getAttribute('aria-label') === 'View details for ' + name) ||
     null;
+  const empty = () => [...document.querySelectorAll('[aria-live=polite]')].some((d) => d.textContent.trim() === 'No items match your search.');
   const button = (m, dir, kind) => m.querySelector('button[aria-label="' + dir + ' ' + kind + ' count"]');
   const usable = (b) => !!b && !b.disabled;
   const counts = (m) =>
@@ -41,24 +44,41 @@
   // Kinds Arrow Up raised in the open modal, newest last; Arrow Down undoes the newest first.
   let raised = [];
 
-  async function open(id, name) {
+  // `g`: generation of the scan that asked for this open; once a newer scan bumps `gen` the open stops silently.
+  // Arrow steps pass null: they are never cancelled, so no key press is lost.
+  async function open(id, name, g) {
+    const stale = () => g != null && g !== gen;
     if (modalFor(id)) return true;
+    if (stale()) return false;
     raised = [];
-    const r = await until(router, 15000);
+    const r = await until(router, 15000, g);
+    if (stale()) return false;
     if (!r) return log('tracker: page not ready'), false;
     const other = itemModal();
     if (other) {
       other.querySelector('button[aria-label="Close"]')?.click();
-      await until(() => !itemModal(), 2000);
+      await until(() => !itemModal(), 2000, g);
+      if (stale()) return false;
     }
     const route = r.currentRoute.value;
     if (route.path !== '/needed-items' || route.query.q !== name) await r.replace({ path: '/needed-items', query: { q: name } });
-    const combined = await until(() => document.querySelector('button[aria-label="Combined view"]'), 8000);
+    if (stale()) return false;
+    const combined = await until(() => document.querySelector('button[aria-label="Combined view"]'), 8000, g);
+    if (stale()) return false;
     if (combined && combined.getAttribute('aria-pressed') === 'false') combined.click();
-    const c = await until(() => card(id, name), 8000);
-    if (!c) return log('tracker: ' + name + ' not in needed items'), false;
+    let emptySince = 0;
+    const c = await until(() => {
+      const found = card(id, name);
+      if (found) return found;
+      if (!empty()) return (emptySince = 0), null;
+      emptySince ||= Date.now();
+      return Date.now() - emptySince >= 400 ? 'none' : null;
+    }, 8000, g);
+    if (stale()) return false;
+    if (!c || c === 'none') return log('tracker: ' + name + ' not in needed items'), false;
     c.click();
-    const ok = !!(await until(() => modalFor(id), 5000));
+    const ok = !!(await until(() => modalFor(id), 5000, g));
+    if (stale()) return false;
     log('tracker: ' + name + (ok ? ' opened' : ' did not open'));
     return ok;
   }
@@ -66,7 +86,7 @@
   // Up: FIR first; Non-FIR once FIR is full (only with `overfill`) or when the item needs no FIR.
   // Down: the newest raised kind, else Non-FIR, else FIR.
   async function step(id, name, up, overfill) {
-    if (!(await open(id, name))) return toast(name, 'not in your TarkovTracker needed items', true);
+    if (!(await open(id, name, null))) return toast(name, 'not in your TarkovTracker needed items', true);
     const m = modalFor(id);
     let kind = null;
     if (up) {
@@ -115,12 +135,17 @@
     post({ progress: { mode: s.mode, objectives: pick(s.d.taskObjectives), parts: pick(s.d.hideoutParts) } });
   }
 
+  let gen = 0; // scan generation: each scan's open() bumps it, which aborts older scans' opens
   let queue = Promise.resolve();
   const run = (f) => {
     queue = queue.then(f).catch((e) => log('tracker: ' + e));
   };
+  // Bumping `gen` at call time (not when the queued job starts) is what lets a newer scan cancel older opens.
   window.__chad = {
-    open: (id, name) => run(() => open(id, name)),
+    open: (id, name) => {
+      const g = ++gen;
+      run(() => open(id, name, g));
+    },
     step: (id, name, up, overfill) => run(() => step(id, name, up, overfill)),
   };
 })();
