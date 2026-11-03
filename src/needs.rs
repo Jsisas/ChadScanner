@@ -667,6 +667,15 @@ mod tests {
     }
 
     #[test]
+    fn dialogue_gated_find_give_pair_counts_once_as_conditional() {
+        let mut t = task("placeholder_pay_the_fare", vec![obj("find", "findItem", 1, true), obj("give", "giveItem", 1, true)]);
+        t.other_requirements = vec![crate::data::OtherRequirement { kind: "dialogue".into(), ..Default::default() }];
+        let n = quest_needs(&catalog(vec![t]), ITEM, &known(), true);
+        assert_eq!((n.current, n.conditional), (0, 1));
+        assert_eq!(n.tasks.len(), 1);
+    }
+
+    #[test]
     fn level_locked_task_is_future_with_unlock_level() {
         let mut t = task("t", vec![obj("g", "giveItem", 4, false)]);
         t.min_player_level = 20;

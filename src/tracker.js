@@ -80,17 +80,39 @@
     button(m, up ? 'Increase' : 'Decrease', kind).click();
     if (up) raised.push(kind);
     else if (raised.lastIndexOf(kind) >= 0) raised.splice(raised.lastIndexOf(kind), 1);
-    await Promise.resolve(); // Vue re-renders on the microtask queue
+    await sleep(0); // Vue re-renders on the microtask queue; a macrotask later the Smart Fill button's state is current
+    smartFill();
     toast(name, counts(m), false);
+    postProgress();
   }
 
+  // Writes the modal's collected totals into the objective/hideout counts. The site disables Smart Fill at 0/0,
+  // so a drop to zero goes through Reset, which zeroes every need of the item (the same distribution).
   function smartFill() {
     const m = itemModal();
     const b = m && m.querySelector('[class*="i-mdi:auto-fix"]')?.closest('button');
     if (!b) return log('tracker: no item open for Smart Fill');
-    if (b.disabled) return;
+    if (b.disabled) {
+      const reset = b.parentElement.querySelector('[class*="i-mdi:refresh"]')?.closest('button');
+      if (!usable(reset)) return;
+      reset.click();
+      return log('tracker: Smart Fill at 0/0 -> Reset');
+    }
     b.click();
     log('tracker: Smart Fill ' + counts(m));
+  }
+
+  // Reports the site's own progress store (current game mode) so the card can redraw without waiting for the API.
+  const tarkovState = () => {
+    const s = document.querySelector('#__nuxt')?.__vue_app__?.config.globalProperties.$pinia?.state.value.swapTarkov;
+    return s ? { mode: s.currentGameMode, d: s[s.currentGameMode] || {} } : null;
+  };
+  function postProgress() {
+    const s = tarkovState();
+    if (!s) return log('tracker: no progress store');
+    const pick = (m) =>
+      Object.fromEntries(Object.entries(m || {}).map(([id, e]) => [id, { count: Number(e?.count) || 0, complete: !!e?.complete }]));
+    post({ progress: { mode: s.mode, objectives: pick(s.d.taskObjectives), parts: pick(s.d.hideoutParts) } });
   }
 
   let queue = Promise.resolve();
@@ -100,6 +122,5 @@
   window.__chad = {
     open: (id, name) => run(() => open(id, name)),
     step: (id, name, up, overfill) => run(() => step(id, name, up, overfill)),
-    smartFill: () => run(smartFill),
   };
 })();

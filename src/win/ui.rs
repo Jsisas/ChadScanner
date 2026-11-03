@@ -78,6 +78,13 @@ pub trait TrayActions {
     fn update(&self);
     /// A toast about the TarkovTracker window (`warn`: amber, else green).
     fn tracker_toast(&self, title: &str, body: &str, warn: bool);
+    /// The TarkovTracker window reported its own progress for `mode` (`pvp`/`pve`/`seasonal`).
+    fn tracker_progress(
+        &self,
+        mode: &str,
+        objectives: std::collections::HashMap<String, crate::progress::ObjectiveProgress>,
+        parts: std::collections::HashMap<String, crate::progress::PartProgress>,
+    );
 }
 
 const TOAST_SECONDS: f32 = 4.0;
@@ -308,11 +315,13 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
             if msg.hwnd == card.hwnd && msg.message == WM_TIMER {
                 let now = Instant::now();
                 if let Some(t) = tracker.as_mut() {
-                    t.tick(now);
                     for m in t.drain() {
                         match crate::tracker::parse(&m) {
                             Some(crate::tracker::Message::Toast { title, body, warn }) => actions.tracker_toast(&title, &body, warn),
                             Some(crate::tracker::Message::Log(s)) => log::info!("{s}"),
+                            Some(crate::tracker::Message::Progress { mode, objectives, parts }) => {
+                                actions.tracker_progress(&mode, objectives, parts)
+                            }
                             None => log::warn!("tracker: unknown message {m}"),
                         }
                     }

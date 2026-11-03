@@ -1,7 +1,7 @@
 //! The TarkovTracker window: a plain top-level Win32 window hosting a WebView2 (via wry) on the UI
 //! thread, whose message loop pumps WebView2. The page is driven by `crate::tracker`'s script.
 use crate::config::{write_atomic, Paths};
-use crate::tracker::{self, FillTimer};
+use crate::tracker;
 use raw_window_handle::{HandleError, HasWindowHandle, RawWindowHandle, Win32WindowHandle, WindowHandle};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -9,7 +9,6 @@ use std::num::NonZeroIsize;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{MonitorFromRect, MONITOR_DEFAULTTONULL};
@@ -62,7 +61,6 @@ pub struct Tracker {
     webview: wry::WebView,
     _context: wry::WebContext,
     messages: Rc<RefCell<Vec<String>>>,
-    fill: FillTimer,
     /// Id and name of the last scanned item.
     last: Option<(String, String)>,
     paths: Paths,
@@ -92,7 +90,6 @@ impl Tracker {
             webview,
             _context: context,
             messages,
-            fill: FillTimer::default(),
             last: None,
             paths: paths.clone(),
             open,
@@ -128,9 +125,6 @@ impl Tracker {
 
     pub fn hide(&mut self) {
         self.open.store(false, Ordering::Relaxed);
-        if self.fill.take() {
-            self.eval(tracker::FILL_SCRIPT);
-        }
         self.save_rect();
         if let Err(e) = self.webview.set_visible(false) {
             log::warn!("tracker: hiding webview: {e}");
@@ -146,25 +140,14 @@ impl Tracker {
         if !self.visible() {
             return;
         }
-        // Flush the previous item's counts before its modal closes.
-        if self.fill.take() {
-            self.eval(tracker::FILL_SCRIPT);
-        }
         self.eval(&tracker::open_script(id, name));
     }
 
-    /// One Arrow key press for the last scanned item; Smart Fill follows once the keys stop.
+    /// One Arrow key press for the last scanned item; the script runs Smart Fill at once.
     pub fn step(&mut self, up: bool, overfill: bool) {
         let Some((id, name)) = &self.last else { return };
         let script = tracker::step_script(id, name, up, overfill);
         self.eval(&script);
-        self.fill.bumped(Instant::now());
-    }
-
-    pub fn tick(&mut self, now: Instant) {
-        if self.fill.due(now) {
-            self.eval(tracker::FILL_SCRIPT);
-        }
     }
 
     /// Messages the page posted since the last call.

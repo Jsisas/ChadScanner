@@ -69,6 +69,8 @@ pub trait ProgressSource: Send + Sync {
     fn writes_objectives(&self) -> bool;
     /// Re-reads remote progress when the snapshot is older than a few seconds; called before a scan.
     fn refresh_if_stale(&self) {}
+    /// Merges progress observed outside ChadScanner (the TarkovTracker window) into the shown snapshot, without writing.
+    fn observe(&self, _objectives: &HashMap<String, ObjectiveProgress>, _parts: &HashMap<String, PartProgress>) {}
 }
 
 /// Toast sink: (title, body).
@@ -710,6 +712,16 @@ impl ProgressSource for TrackerSource {
 
     fn writes_objectives(&self) -> bool {
         false
+    }
+
+    fn observe(&self, objectives: &HashMap<String, ObjectiveProgress>, parts: &HashMap<String, PartProgress>) {
+        self.apply(|p, _| {
+            for (id, o) in objectives {
+                let invalid = p.objectives.get(id).is_some_and(|old| old.invalid);
+                p.objectives.insert(id.clone(), ObjectiveProgress { invalid, ..*o });
+            }
+            p.hideout_parts.extend(parts.iter().map(|(id, v)| (id.clone(), *v)));
+        });
     }
 
     fn refresh_if_stale(&self) {

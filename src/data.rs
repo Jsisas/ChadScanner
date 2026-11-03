@@ -9,6 +9,9 @@ use std::time::Duration;
 
 pub const ENDPOINTS: [&str; 10] =
     ["items", "items_en", "tasks", "tasks_en", "hideout", "hideout_en", "traders", "traders_en", "barters", "crafts"];
+/// Cache/body key of TarkovTracker's `tasks-core` (json.tarkov.dev plus tasks only its overlay has).
+/// Optional: kept out of `ENDPOINTS`, which are all required.
+const TRACKER_TASKS: &str = "tt_tasks_core";
 const REFRESH: Duration = Duration::from_secs(600);
 const RETRY: Duration = Duration::from_secs(60);
 
@@ -346,6 +349,153 @@ fn tr(map: &HashMap<String, String>, key: &str) -> String {
     map.get(key).cloned().unwrap_or_else(|| key.to_owned())
 }
 
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct RawTrackerTaskReq {
+    task: Option<Value>,
+    status: Option<Vec<String>>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct RawTrackerTraderReq {
+    trader: Option<Value>,
+    requirement_type: Option<String>,
+    compare_method: Option<String>,
+    value: Option<f64>,
+}
+
+/// A task as `tasks-core` serves it: references are `{id, name}` objects and most fields may be absent or null.
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct RawTrackerTask {
+    id: String,
+    name: Option<String>,
+    min_player_level: Option<u32>,
+    task_requirements: Option<Vec<RawTrackerTaskReq>>,
+    normalized_trader_requirements: Option<Vec<RawTrackerTraderReq>>,
+    other_requirements: Option<Vec<RawOtherReq>>,
+    faction_name: Option<String>,
+    kappa_required: Option<bool>,
+    lightkeeper_required: Option<bool>,
+    objectives: Option<Vec<RawObjective>>,
+}
+
+impl From<RawTrackerTask> for RawTask {
+    fn from(t: RawTrackerTask) -> RawTask {
+        RawTask {
+            name: t.name.unwrap_or_else(|| t.id.clone()),
+            id: t.id,
+            min_player_level: t.min_player_level,
+            task_requirements: t
+                .task_requirements
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|r| Some(RawTaskReq { task: r.task.as_ref().and_then(ref_id)?, status: r.status.unwrap_or_default() }))
+                .collect(),
+            trader_requirements: t
+                .normalized_trader_requirements
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|r| {
+                    Some(RawTraderReq {
+                        trader: r.trader.as_ref().and_then(ref_id)?,
+                        requirement_type: r.requirement_type.unwrap_or_default(),
+                        compare_method: r.compare_method.unwrap_or_default(),
+                        value: r.value.unwrap_or(0.0),
+                    })
+                })
+                .collect(),
+            other_requirements: t.other_requirements.unwrap_or_default(),
+            faction_name: t.faction_name,
+            kappa_required: t.kappa_required,
+            lightkeeper_required: t.lightkeeper_required,
+            objectives: t.objectives.unwrap_or_default(),
+        }
+    }
+}
+
+/// Tasks from a `tasks-core` response. Never fails: an unusable response or element is logged and skipped.
+fn tracker_tasks(body: &[u8]) -> Vec<RawTask> {
+    let list = match data(body) {
+        Ok(mut d) => d.get_mut("tasks").map(Value::take),
+        Err(e) => {
+            log::warn!("TarkovTracker tasks unusable: {e:#}");
+            return Vec::new();
+        }
+    };
+    let Some(Value::Array(list)) = list else {
+        log::warn!("TarkovTracker tasks unusable: no `tasks` array");
+        return Vec::new();
+    };
+    list.into_iter()
+        .filter_map(|v| match serde_json::from_value::<RawTrackerTask>(v) {
+            Ok(t) if !t.id.is_empty() => Some(RawTask::from(t)),
+            Ok(_) => None,
+            Err(e) => {
+                log::warn!("TarkovTracker task skipped: {e}");
+                None
+            }
+        })
+        .collect()
+}
+
+fn task_from_raw(r: RawTask, tasks_en: &HashMap<String, String>, chains: &mut HashMap<String, Vec<(f64, String)>>) -> Task {
+    let other_requirements: Vec<OtherRequirement> = r
+        .other_requirements
+        .into_iter()
+        .map(|o| OtherRequirement {
+            kind: o.kind,
+            variable_id: o.variable_id.unwrap_or_default(),
+            compare_method: o.compare_method.unwrap_or_default(),
+            value: o.value.unwrap_or(0.0),
+        })
+        .collect();
+    for o in &other_requirements {
+        if !o.variable_id.is_empty() && o.kind.eq_ignore_ascii_case("globalVariable") {
+            chains.entry(o.variable_id.clone()).or_default().push((o.value, r.id.clone()));
+        }
+    }
+    Task {
+        name: tr(tasks_en, &r.name),
+        min_player_level: r.min_player_level.unwrap_or(0),
+        task_requirements: r
+            .task_requirements
+            .into_iter()
+            .map(|t| TaskRequirement { task: t.task, status: t.status })
+            .collect(),
+        trader_requirements: r
+            .trader_requirements
+            .into_iter()
+            .map(|t| TraderRequirement {
+                trader: t.trader,
+                requirement_type: t.requirement_type,
+                compare_method: t.compare_method,
+                value: t.value,
+            })
+            .collect(),
+        other_requirements,
+        faction_name: r.faction_name.unwrap_or_default(),
+        kappa_required: r.kappa_required.unwrap_or(false),
+        lightkeeper_required: r.lightkeeper_required.unwrap_or(false),
+        objectives: r
+            .objectives
+            .into_iter()
+            .map(|o| Objective {
+                id: o.id,
+                kind: o.kind,
+                count: o.count.unwrap_or(0.0).max(0.0) as u32,
+                optional: o.optional,
+                found_in_raid: o.found_in_raid,
+                items: o.items.iter().filter_map(ref_id).collect(),
+                marker_item: o.marker_item.as_ref().and_then(ref_id),
+                build_item: o.item.as_ref().and_then(ref_id),
+            })
+            .collect(),
+        id: r.id,
+    }
+}
+
 impl Catalog {
     /// `bodies`: raw response per endpoint name in `ENDPOINTS`.
     pub fn build(bodies: &HashMap<&str, Vec<u8>>) -> anyhow::Result<Catalog> {
@@ -382,65 +532,20 @@ impl Catalog {
         let raw_tasks: HashMap<String, RawTask> =
             serde_json::from_value(tasks_data.get_mut("tasks").map(Value::take).unwrap_or_default())?;
         let mut chains: HashMap<String, Vec<(f64, String)>> = HashMap::new();
-        let tasks = raw_tasks
+        let mut tasks: HashMap<String, Task> = raw_tasks
             .into_values()
             .map(|r| {
-                let other_requirements: Vec<OtherRequirement> = r
-                    .other_requirements
-                    .into_iter()
-                    .map(|o| OtherRequirement {
-                        kind: o.kind,
-                        variable_id: o.variable_id.unwrap_or_default(),
-                        compare_method: o.compare_method.unwrap_or_default(),
-                        value: o.value.unwrap_or(0.0),
-                    })
-                    .collect();
-                for o in &other_requirements {
-                    if !o.variable_id.is_empty() && o.kind.eq_ignore_ascii_case("globalVariable") {
-                        chains.entry(o.variable_id.clone()).or_default().push((o.value, r.id.clone()));
-                    }
-                }
-                let task = Task {
-                    name: tr(&tasks_en, &r.name),
-                    min_player_level: r.min_player_level.unwrap_or(0),
-                    task_requirements: r
-                        .task_requirements
-                        .into_iter()
-                        .map(|t| TaskRequirement { task: t.task, status: t.status })
-                        .collect(),
-                    trader_requirements: r
-                        .trader_requirements
-                        .into_iter()
-                        .map(|t| TraderRequirement {
-                            trader: t.trader,
-                            requirement_type: t.requirement_type,
-                            compare_method: t.compare_method,
-                            value: t.value,
-                        })
-                        .collect(),
-                    other_requirements,
-                    faction_name: r.faction_name.unwrap_or_default(),
-                    kappa_required: r.kappa_required.unwrap_or(false),
-                    lightkeeper_required: r.lightkeeper_required.unwrap_or(false),
-                    objectives: r
-                        .objectives
-                        .into_iter()
-                        .map(|o| Objective {
-                            id: o.id,
-                            kind: o.kind,
-                            count: o.count.unwrap_or(0.0).max(0.0) as u32,
-                            optional: o.optional,
-                            found_in_raid: o.found_in_raid,
-                            items: o.items.iter().filter_map(ref_id).collect(),
-                            marker_item: o.marker_item.as_ref().and_then(ref_id),
-                            build_item: o.item.as_ref().and_then(ref_id),
-                        })
-                        .collect(),
-                    id: r.id,
-                };
+                let task = task_from_raw(r, &tasks_en, &mut chains);
                 (task.id.clone(), task)
             })
             .collect();
+        // Tasks only TarkovTracker's overlay has (e.g. "Pay the Fare!"); json.tarkov.dev wins on shared ids.
+        for r in bodies.get(TRACKER_TASKS).map(|b| tracker_tasks(b)).unwrap_or_default() {
+            if !tasks.contains_key(&r.id) {
+                let task = task_from_raw(r, &tasks_en, &mut chains);
+                tasks.insert(task.id.clone(), task);
+            }
+        }
 
         let raw_stations: HashMap<String, RawStation> = serde_json::from_value(data(body("hideout")?)?)?;
         let mut stations: Vec<Station> = raw_stations
@@ -531,6 +636,9 @@ pub fn load_cached(cache_dir: &Path, mode: Mode) -> Option<Catalog> {
     for ep in ENDPOINTS {
         bodies.insert(ep, std::fs::read(cache_file(cache_dir, mode, ep)).ok()?);
     }
+    if let Ok(b) = std::fs::read(cache_file(cache_dir, mode, TRACKER_TASKS)) {
+        bodies.insert(TRACKER_TASKS, b);
+    }
     Catalog::build(&bodies).map_err(|e| log::warn!("cached {} data unusable: {e:#}", mode.api())).ok()
 }
 
@@ -549,6 +657,21 @@ fn fetch_all(agent: &ureq::Agent, cache_dir: &Path, mode: Mode) -> anyhow::Resul
         let mut body = Vec::new();
         std::io::Read::read_to_end(&mut agent.get(&url).call()?.into_reader(), &mut body)?;
         bodies.insert(ep, body);
+    }
+    // Optional: tasks only TarkovTracker's overlay has. A failed or non-JSON response keeps the cached copy.
+    let url = format!("https://tarkovtracker.org/api/tarkov/tasks-core?gameMode={}&lang=en", mode.api());
+    let fetched = (|| -> anyhow::Result<Vec<u8>> {
+        let mut body = Vec::new();
+        std::io::Read::read_to_end(&mut agent.get(&url).call()?.into_reader(), &mut body)?;
+        data(&body)?;
+        Ok(body)
+    })();
+    let tracker = fetched
+        .map_err(|e| log::warn!("TarkovTracker tasks: {e:#}"))
+        .ok()
+        .or_else(|| std::fs::read(cache_file(cache_dir, mode, TRACKER_TASKS)).ok());
+    if let Some(b) = tracker {
+        bodies.insert(TRACKER_TASKS, b);
     }
     let catalog = Catalog::build(&bodies)?;
     // Cache only a set that parsed, so a bad response never replaces a good cache.
@@ -612,8 +735,7 @@ impl Store {
 mod tests {
     use super::*;
 
-    #[test]
-    fn builds_from_tarkov_dev_shapes() {
+    fn base() -> HashMap<&'static str, Vec<u8>> {
         let mut b: HashMap<&str, Vec<u8>> = HashMap::new();
         b.insert("items", br#"{"data":{"items":{"a":{"id":"a","name":"a Name","shortName":"a ShortName","width":1,"height":2,"avg24hPrice":1001,"sellToTrader":[{"trader":"t1","priceRUB":10},{"trader":"t2","priceRUB":30}]}},"fleaMarket":{}}}"#.to_vec());
         b.insert("items_en", br#"{"data":{"a Name":"Alpha","a ShortName":"A"}}"#.to_vec());
@@ -625,7 +747,12 @@ mod tests {
         b.insert("traders_en", br#"{"data":{"t1 Nickname":"Prapor"}}"#.to_vec());
         b.insert("barters", br#"{"data":[{"trader":"t1","requiredItems":[{"item":"a","count":155.1}],"offeredItem":{"item":"b","count":1}}]}"#.to_vec());
         b.insert("crafts", br#"{"data":[{"requiredItems":[{"item":"a","count":1}],"productItem":{"item":"b"}}]}"#.to_vec());
-        let c = Catalog::build(&b).unwrap();
+        b
+    }
+
+    #[test]
+    fn builds_from_tarkov_dev_shapes() {
+        let c = Catalog::build(&base()).unwrap();
         let a = &c.items["a"];
         assert_eq!(a.short_name, "A");
         assert_eq!(a.name, "Alpha");
@@ -638,6 +765,42 @@ mod tests {
         assert_eq!(c.traders["t1"], "Prapor");
         assert_eq!(c.barters[0].required_items, vec!["a"]);
         assert_eq!(c.chains["v"], vec![(3.0, "q".to_owned())]);
+    }
+
+    #[test]
+    fn merges_tasks_only_tarkov_tracker_has() {
+        let mut b = base();
+        b.insert(
+            TRACKER_TASKS,
+            br#"{"data":{"tasks":[
+                {"id":"q","name":"Overridden","minPlayerLevel":40},
+                {"id":"placeholder_x","name":"Pay","minPlayerLevel":null,"otherRequirements":[{"type":"dialogue","id":"d"}],
+                 "taskRequirements":[{"task":{"id":"q","name":"Quest"},"status":["complete"]}],
+                 "normalizedTraderRequirements":[{"requirementType":"level","compareMethod":">=","value":2,"trader":{"id":"t1","name":"Prapor"}}],
+                 "objectives":[{"id":"o1","type":"findItem","count":1,"foundInRaid":true,"optional":false,"items":[{"id":"a","name":"A"}]},
+                               {"id":"o2","type":"giveItem","count":1,"foundInRaid":true,"optional":false,"items":[{"id":"a","name":"A"}]}]},
+                {"id":"broken","name":"Broken","objectives":5}
+            ]}}"#
+                .to_vec(),
+        );
+        let c = Catalog::build(&b).unwrap();
+        assert_eq!(c.tasks["q"].name, "Quest", "json.tarkov.dev wins on shared ids");
+        assert_eq!(c.tasks["q"].min_player_level, 5);
+        let x = &c.tasks["placeholder_x"];
+        assert_eq!(x.min_player_level, 0);
+        assert_eq!(x.objectives.len(), 2);
+        assert_eq!(x.objectives[0].items, vec!["a"]);
+        assert_eq!(x.task_requirements[0].task, "q");
+        assert_eq!(x.trader_requirements[0].trader, "t1");
+        assert_eq!(x.other_requirements[0].kind, "dialogue");
+        assert!(!c.tasks.contains_key("broken"));
+    }
+
+    #[test]
+    fn unusable_tarkov_tracker_body_is_ignored() {
+        let mut b = base();
+        b.insert(TRACKER_TASKS, b"<html>".to_vec());
+        assert!(Catalog::build(&b).unwrap().tasks.contains_key("q"));
     }
 
     #[test]

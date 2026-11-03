@@ -94,8 +94,8 @@ to English.
 - A scan opens the item's Needed-Items view in the window.
 - While the window is open and EFT is focused, **Arrow Up / Down** change that item's FIR / Non-FIR count there
   (FIR first, then non-FIR when *Scanning → continue into non-FIR ones* is on) instead of the quest-progress keys above.
-  **Smart Fill** is clicked 1.5 s after the last press. With the window closed the keys work as described above.
-- Counts changed in the window are not applied to the card until its next progress read.
+  **Smart Fill** runs after every press (at 0 it uses **Reset**, so counts drop back to 0 on the site too). With the window closed the keys work as described above.
+- The card redraws after every press from the window's own progress (same game mode only); the next API read confirms it.
 
 ## Debug report
 
@@ -136,6 +136,7 @@ layout) on Linux.
 ## Data sources
 
 - Items, quests, hideout, traders, barters, crafts: [json.tarkov.dev](https://json.tarkov.dev), refreshed every 10 min.
+- Quests only TarkovTracker adds (e.g. "Pay the Fare!"): its `tasks-core` endpoint, merged in when json.tarkov.dev lacks them.
 - Progress: [TarkovTracker](https://tarkovtracker.org) API or the local file.
 - Quest events and game mode: EFT's own log files.
 

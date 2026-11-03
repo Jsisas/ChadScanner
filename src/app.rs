@@ -4,9 +4,10 @@ use crate::config::{Config, Mode, Paths, Source};
 use crate::data::Store;
 use crate::eftlog::{self, Event, LogState, Tailer};
 use crate::needs;
-use crate::progress::{LocalSource, Notify, ProgressSource, TaskState, TrackerSource};
+use crate::progress::{LocalSource, Notify, ObjectiveProgress, PartProgress, ProgressSource, TaskState, TrackerSource};
 use crate::win::{self, hook::ScanRequest, ui};
 use chadvision::engine::Engine;
+use std::collections::HashMap;
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
@@ -301,7 +302,7 @@ impl App {
 
     /// Raises (`delta` > 0) or lowers the last scanned item's next quest objective by one and redraws its card.
     fn step(&self, delta: i32) {
-        let Some((item_id, at, score)) = self.last_item.lock().unwrap().clone() else { return };
+        let Some((item_id, _, _)) = self.last_item.lock().unwrap().clone() else { return };
         let Some(cat) = self.store.read().unwrap().get() else { return };
         let Some(item) = cat.items.get(&item_id) else { return };
         let src = self.progress();
@@ -340,11 +341,19 @@ impl App {
         }
         let fir = if slot.fir { " FIR" } else { "" };
         self.toast(&format!("{} {}/{}{fir}", item.short_name, new, slot.required), &slot.task_name, card::GREEN);
+        self.redraw_last_card();
+    }
+
+    /// Redraws the last scanned item's card from the current progress snapshot.
+    fn redraw_last_card(&self) {
+        let Some((item_id, at, score)) = self.last_item.lock().unwrap().clone() else { return };
+        let Some(cat) = self.store.read().unwrap().get() else { return };
+        let Some(item) = cat.items.get(&item_id) else { return };
         let (opts, seconds) = {
             let c = self.cfg.read().unwrap();
             (card::CardOptions::from_config(&c), c.tooltip_seconds)
         };
-        let c = card::item_card(&cat, item, score, &src.snapshot(), &opts);
+        let c = card::item_card(&cat, item, score, &self.progress().snapshot(), &opts);
         self.show_card(&c, at, Some(seconds).filter(|s| *s > 0.0));
     }
 
@@ -641,6 +650,21 @@ impl ui::TrayActions for Arc<App> {
 
     fn tracker_toast(&self, title: &str, body: &str, warn: bool) {
         self.toast(title, body, if warn { card::AMBER } else { card::GREEN });
+    }
+
+    fn tracker_progress(
+        &self,
+        mode: &str,
+        objectives: HashMap<String, ObjectiveProgress>,
+        parts: HashMap<String, PartProgress>,
+    ) {
+        let active = self.cfg.read().unwrap().mode;
+        if mode != active.key() {
+            log::info!("tracker: progress for {mode} ignored (ChadScanner is on {})", active.key());
+            return;
+        }
+        self.progress().observe(&objectives, &parts);
+        self.redraw_last_card();
     }
 
     fn update(&self) {
