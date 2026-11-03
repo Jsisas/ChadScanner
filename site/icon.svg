@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="#14181b"/>
+  <!-- plate carrier -->
+  <path d="M24 248 C34 216 72 202 108 202 L176 206 C210 210 232 230 240 248 Z" fill="#3b434a"/>
+  <path d="M92 248 L102 210 L182 214 L190 248 Z" fill="#2a3036"/>
+  <rect x="112" y="224" width="58" height="12" rx="2" fill="#ffb020"/>
+  <!-- thick neck -->
+  <path d="M92 150 L86 214 L176 218 L178 196 L150 196 L124 182 Z" fill="#c8bfb0"/>
+  <!-- head + profile -->
+  <path d="M74 108 C70 136 78 158 96 172 L124 196 C140 210 160 218 184 220 L210 221
+           C222 221 230 215 230 205 L227 192 C224 188 219 186 218 182 C222 179 222 175 218 172
+           C221 169 221 166 219 163 L234 158 C236 153 230 144 224 136 L217 129 L223 122 L217 110 Z" fill="#ece6da"/>
+  <!-- jaw underside / beard shadow -->
+  <path d="M120 186 C138 200 160 210 184 212 L210 213 C220 213 226 209 228 202 L226 194 C212 198 194 198 176 196 C156 194 138 188 124 178 Z" fill="#9e9587"/>
+  <!-- cheek hollow -->
+  <path d="M217 134 L228 154 L219 160" stroke="#a89f90" stroke-width="4" fill="none" stroke-linejoin="round"/>
+  <!-- brow ridge shadow + eye -->
+  <path d="M178 116 L218 112 L220 124 L180 128 Z" fill="#26292c"/>
+  <path d="M192 132 L210 130" stroke="#14181b" stroke-width="6" stroke-linecap="round"/>
+  <!-- mouth -->
+  <path d="M204 176 L218 176" stroke="#6f6658" stroke-width="3" stroke-linecap="round"/>
+  <!-- helmet (FAST) -->
+  <path d="M60 114 C54 60 94 30 146 30 C192 30 218 60 220 100 L220 110 L60 118 Z" fill="#4c555c"/>
+  <path d="M66 104 L218 98" stroke="#2b3136" stroke-width="7"/>
+  <rect x="152" y="40" width="36" height="16" rx="3" fill="#2b3136"/>
+  <path d="M196 64 L214 86" stroke="#2b3136" stroke-width="7" stroke-linecap="round"/>
+  <!-- comtac ear cup -->
+  <path d="M124 100 L128 60" stroke="#2b3136" stroke-width="9" stroke-linecap="round"/>
+  <rect x="98" y="100" width="46" height="60" rx="19" fill="#2b3136"/>
+  <rect x="108" y="110" width="26" height="40" rx="11" fill="#ffb020"/>
+</svg>

@@ -173,10 +173,15 @@ impl Config {
     /// Missing file → defaults; an unreadable file is logged and replaced by defaults.
     pub fn load(path: &Path) -> Config {
         match std::fs::read_to_string(path) {
-            Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-                log::warn!("config.json unreadable ({e}); using defaults");
-                Config::default()
-            }),
+            Ok(text) => serde_json::from_str::<Config>(&text)
+                .map(|mut c| {
+                    c.tooltip_seconds = if c.tooltip_seconds.is_finite() { c.tooltip_seconds.clamp(0.0, 30.0) } else { 0.0 };
+                    c
+                })
+                .unwrap_or_else(|e| {
+                    log::warn!("config.json unreadable ({e}); using defaults");
+                    Config::default()
+                }),
             Err(_) => Config::default(),
         }
     }
@@ -285,5 +290,30 @@ impl Paths {
     }
     pub fn cache(&self) -> PathBuf {
         self.appdata.join("cache")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_round_trip() {
+        assert_eq!(from_hex("0a"), Some(vec![10]));
+        assert_eq!(from_hex("0"), None);
+        assert_eq!(from_hex("zz"), None);
+        assert_eq!(from_hex(""), Some(vec![]));
+        assert_eq!(from_hex(&to_hex(&[0, 255, 16])), Some(vec![0, 255, 16]));
+    }
+
+    #[test]
+    fn load_clamps_tooltip_seconds() {
+        let d = std::env::temp_dir().join(format!("chadscanner-test-{}-cfg", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("config.json");
+        for (json, want) in [(r#"{"tooltip_seconds":1e30}"#, 30.0), (r#"{"tooltip_seconds":-5}"#, 0.0), (r#"{"tooltip_seconds":7}"#, 7.0)] {
+            std::fs::write(&p, json).unwrap();
+            assert_eq!(Config::load(&p).tooltip_seconds, want, "{json}");
+        }
     }
 }

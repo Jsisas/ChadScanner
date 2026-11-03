@@ -492,6 +492,37 @@ mod tests {
         assert_eq!(rub(-1000), "-1\u{2009}000");
     }
 
+    #[test]
+    fn rub_handles_zero_and_extremes() {
+        assert_eq!(rub(0), "0");
+        assert_eq!(rub(1000), "1\u{2009}000");
+        assert_eq!(rub(i64::MIN), "-9\u{2009}223\u{2009}372\u{2009}036\u{2009}854\u{2009}775\u{2009}808");
+    }
+
+    #[test]
+    fn border_by_price_when_nothing_is_needed() {
+        let cat = Catalog::default();
+        let mk = |p| Item { id: "i".into(), short_name: "X".into(), width: 1, height: 1, avg24h: Some(p), ..Default::default() };
+        assert_eq!(item_card(&cat, &mk(20_000), 1.0, &Progress::default(), &OPTS).border, TEXT);
+        assert_eq!(item_card(&cat, &mk(5_000), 1.0, &Progress::default(), &OPTS).border, GREY);
+        assert_eq!(item_card(&cat, &mk(30_000), 1.0, &Progress::default(), &OPTS).border, GREEN);
+    }
+
+    #[test]
+    fn score_threshold_is_0_7() {
+        let cat = Catalog::default();
+        let item = Item { id: "i".into(), short_name: "Shus".into(), width: 1, height: 1, ..Default::default() };
+        let title = |s| show(&item_card(&cat, &item, s, &Progress::default(), &OPTS))[0].clone();
+        assert!(title(0.7).starts_with("Shus") && !title(0.7).starts_with("Shus ?"));
+        assert!(title(0.69).starts_with("Shus ?"));
+    }
+
+    #[test]
+    fn message_omits_empty_body() {
+        assert_eq!(message("T", "", TEXT).lines.len(), 1);
+        assert_eq!(message("T", "b", TEXT).lines.len(), 2);
+    }
+
     const OPTS: CardOptions =
         CardOptions { show_non_fir: true, max_rows: 10, quests: true, hideout: true, barters: true, crafts: true, smart: true, goal: Goal::None };
 

@@ -10,7 +10,15 @@ fi
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$1"
 
+abs="$(realpath -m "$out")"
+case "$abs" in
+  "$root" | "$root/site" | "$root/assets" | / | "$root/site/"*)
+    echo "refusing to use $out as OUT" >&2
+    exit 2
+    ;;
+esac
+
 rm -rf "$out"
 mkdir -p "$out"
-cp -r "$root/site/." "$out/"
+cp -r "$root/site/." "$out/" && rm -f "$out/main.test.js"
 cp "$root/assets/icon.svg" "$root/assets/icon-32.png" "$root/assets/icon-256.png" "$out/"

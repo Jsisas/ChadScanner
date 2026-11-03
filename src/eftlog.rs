@@ -311,4 +311,9 @@ mod tests {
         assert!(t.poll().len() <= 3);
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn parses_crlf_log() {
+        assert_eq!(parse(&LOG.replace('\n', "\r\n")), parse(LOG));
+    }
 }

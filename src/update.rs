@@ -172,7 +172,11 @@ pub fn swap_exe(exe: &Path, install: &Path) -> anyhow::Result<()> {
         let _ = std::fs::rename(&old, exe);
         return Err(e).context("moving the new exe into place");
     }
-    File::create(install.join(STAGING).join(READY))?;
+    if let Err(e) = File::create(install.join(STAGING).join(READY)) {
+        let _ = std::fs::rename(exe, install.join(STAGING).join(EXE));
+        let _ = std::fs::rename(&old, exe);
+        return Err(e).context("marking the update ready");
+    }
     Ok(())
 }
 
@@ -285,5 +289,45 @@ mod tests {
         assert!(!finish(&d).unwrap());
         assert_eq!(std::fs::read_to_string(d.join("data/key.txt")).unwrap(), "old");
         assert!(!d.join("update").exists());
+    }
+
+    #[test]
+    fn parse_version_shapes() {
+        assert_eq!(parse_version("v1.2.3"), Some((1, 2, 3)));
+        assert_eq!(parse_version("1.2.3"), Some((1, 2, 3)));
+        for bad in ["1.2", "1.2.3.4", "1.2.3-beta", ""] {
+            assert_eq!(parse_version(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn installed_data_key_trims_and_rejects_empty() {
+        let d = tmp("data-key");
+        assert_eq!(installed_data_key(&d), None);
+        put(d.join("data/key.txt"), "  \n");
+        assert_eq!(installed_data_key(&d), None);
+        put(d.join("data/key.txt"), " abc\n");
+        assert_eq!(installed_data_key(&d).as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn swap_exe_rolls_back_when_marker_fails() {
+        let d = tmp("swap-rollback");
+        put(d.join(EXE), "old");
+        put(d.join(STAGING).join(EXE), "new");
+        std::fs::create_dir_all(d.join(STAGING).join(READY)).unwrap();
+        assert!(swap_exe(&d.join(EXE), &d).is_err());
+        assert_eq!(std::fs::read_to_string(d.join(EXE)).unwrap(), "old");
+        assert_eq!(std::fs::read_to_string(d.join(STAGING).join(EXE)).unwrap(), "new");
+    }
+
+    #[test]
+    fn swap_exe_success_marks_ready() {
+        let d = tmp("swap-ok");
+        put(d.join(EXE), "old");
+        put(d.join(STAGING).join(EXE), "new");
+        swap_exe(&d.join(EXE), &d).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join(EXE)).unwrap(), "new");
+        assert!(d.join(STAGING).join(READY).exists());
     }
 }

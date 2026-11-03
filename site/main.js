@@ -25,3 +25,5 @@ document.addEventListener('DOMContentLoaded', function () {
     .then(function (rel) { if (rel) applyRelease(rel); })
     .catch(function () {});
 });
+
+if (typeof module !== 'undefined') module.exports = { applyRelease };
