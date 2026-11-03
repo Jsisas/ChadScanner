@@ -1,6 +1,7 @@
 //! Win32 pieces: input hook, screen capture, layered tooltip windows, tray, registry.
 pub mod capture;
 pub mod hook;
+pub mod tracker;
 pub mod ui;
 
 pub mod registry {

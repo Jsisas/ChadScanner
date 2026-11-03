@@ -22,6 +22,8 @@ pub struct TraderPrice {
 pub struct Item {
     pub id: String,
     pub short_name: String,
+    /// Full English name; TarkovTracker searches and labels cards by it.
+    pub name: String,
     pub width: i64,
     pub height: i64,
     pub avg24h: Option<i64>,
@@ -200,6 +202,7 @@ struct RawTraderPrice {
 struct RawItem {
     id: String,
     short_name: String,
+    name: String,
     width: i64,
     height: i64,
     avg24h_price: Option<f64>,
@@ -360,6 +363,7 @@ impl Catalog {
             .map(|r| {
                 let item = Item {
                     short_name: tr(&items_en, &r.short_name),
+                    name: tr(&items_en, &r.name),
                     width: r.width,
                     height: r.height,
                     avg24h: r.avg24h_price.filter(|p| *p > 0.0).map(|p| p as i64),
@@ -624,6 +628,7 @@ mod tests {
         let c = Catalog::build(&b).unwrap();
         let a = &c.items["a"];
         assert_eq!(a.short_name, "A");
+        assert_eq!(a.name, "Alpha");
         assert_eq!(a.price_per_slot(), Some(500));
         assert_eq!(a.best_trader().unwrap().trader, "t2");
         assert_eq!(c.tasks["q"].name, "Quest");

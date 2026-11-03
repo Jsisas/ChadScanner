@@ -237,6 +237,8 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 /// Where everything lives. Data (models, index, refs) ships next to the exe.
 #[derive(Debug, Clone)]
 pub struct Paths {
+    /// The exe's folder; updates rewrite it.
+    pub install: PathBuf,
     pub data: PathBuf,
     pub appdata: PathBuf,
 }
@@ -253,7 +255,7 @@ impl Paths {
             appdata = old;
         }
         std::fs::create_dir_all(appdata.join("cache"))?;
-        Ok(Paths { data: exe_dir.join("data"), appdata })
+        Ok(Paths { data: exe_dir.join("data"), install: exe_dir, appdata })
     }
     pub fn config(&self) -> PathBuf {
         self.appdata.join("config.json")
@@ -272,6 +274,14 @@ impl Paths {
     }
     pub fn reports(&self) -> PathBuf {
         self.appdata.join("reports")
+    }
+    /// Saved TarkovTracker window position (its own file: Settings rewrites `config.json` whole).
+    pub fn tracker_window(&self) -> PathBuf {
+        self.appdata.join("tracker-window.json")
+    }
+    /// WebView2 profile of the TarkovTracker window (keeps the login).
+    pub fn webview(&self) -> PathBuf {
+        self.appdata.join("webview")
     }
     pub fn cache(&self) -> PathBuf {
         self.appdata.join("cache")

@@ -1,0 +1,91 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ChadScanner
+
+      # Keeps the `../ChadVision` path dependency and deploy-wsl.sh's default ChadVision location working.
+      - uses: actions/checkout@v4
+        with:
+          repository: Jsisas/ChadVision
+          ref: main
+          path: ChadVision
+
+      - name: Tag matches Cargo.toml version
+        run: |
+          v=$(sed -n 's/^version = "\(.*\)"$/\1/p' ChadScanner/Cargo.toml | head -1)
+          if [ "${GITHUB_REF_NAME#v}" != "$v" ]; then
+            echo "::error::tag does not match Cargo.toml version"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install lld and zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lld zip
+          if ! command -v lld-link >/dev/null; then
+            sudo ln -sf "$(ls /usr/bin/lld-link-* | sort -V | tail -1)" /usr/local/bin/lld-link
+          fi
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-xwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            ChadScanner -> target
+            ChadVision -> target
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/cargo-xwin
+          key: xwin-v1
+
+      # Models and the ONNX Runtime DLL are static. data/refs and data/index are NOT cached:
+      # they must be fresh from tarkov.dev every release.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ChadVision/data/models
+            ChadVision/data/ort-win-x64-1.22.0
+          key: cv-static-ort1.22.0-v1
+
+      - name: Build and stage
+        run: ChadScanner/tools/deploy-wsl.sh --out "$RUNNER_TEMP/pub"
+
+      # The first release has no previous manifest; the step may fail.
+      - name: Previous manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download --repo "$GITHUB_REPOSITORY" --pattern manifest.json --dir "$RUNNER_TEMP/prev" || true
+
+      - name: Package
+        run: |
+          CHADVISION_SHA=$(git -C ChadVision rev-parse HEAD) ChadScanner/tools/package-release.sh \
+            "$RUNNER_TEMP/pub" "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/prev/manifest.json"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "ChadScanner $GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/dist/notes.md" --generate-notes \
+            "$RUNNER_TEMP"/dist/*.zip "$RUNNER_TEMP/dist/manifest.json"

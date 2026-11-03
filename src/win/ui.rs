@@ -2,7 +2,7 @@
 //!
 //! Every frame is pushed whole with `UpdateLayeredWindow` (position, size and pixels in one
 //! call), so there is no retained surface that could show a stale or half-resized frame.
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -29,18 +29,27 @@ pub enum Cmd {
     HideCard,
     /// Top-centre of the primary monitor for 4 s.
     Toast(Pixmap),
+    /// New text of the tray's update item.
+    UpdateLabel(String),
+    /// Remember this item; open it in the TarkovTracker window when the window is shown.
+    TrackerItem { id: String, name: String },
+    /// One Arrow key press for the open item (`overfill`: `Config::overfill_fir`).
+    TrackerStep { up: bool, overfill: bool },
+    /// Leaves the message loop (the app then exits).
+    Quit,
 }
 
 #[derive(Clone)]
 pub struct Ui {
     tx: Sender<Cmd>,
     hwnd: Arc<AtomicIsize>,
+    tracker: Arc<AtomicBool>,
 }
 
 impl Ui {
     pub fn new() -> (Ui, Receiver<Cmd>) {
         let (tx, rx) = std::sync::mpsc::channel();
-        (Ui { tx, hwnd: Arc::new(AtomicIsize::new(0)) }, rx)
+        (Ui { tx, hwnd: Arc::new(AtomicIsize::new(0)), tracker: Arc::new(AtomicBool::new(false)) }, rx)
     }
 
     pub fn send(&self, c: Cmd) {
@@ -52,6 +61,11 @@ impl Ui {
             }
         }
     }
+
+    /// Whether the TarkovTracker window is shown (the arrow keys then step it instead of quest progress).
+    pub fn tracker_open(&self) -> bool {
+        self.tracker.load(Ordering::Relaxed)
+    }
 }
 
 /// Tray menu actions handled by the app.
@@ -60,6 +74,10 @@ pub trait TrayActions {
     fn set_paused(&self, paused: bool);
     /// Ctrl+Shift+F12.
     fn debug_report(&self);
+    /// Tray "Check for updates" / "Update to vX.Y.Z".
+    fn update(&self);
+    /// A toast about the TarkovTracker window (`warn`: amber, else green).
+    fn tracker_toast(&self, title: &str, body: &str, warn: bool);
 }
 
 const TOAST_SECONDS: f32 = 4.0;
@@ -193,7 +211,7 @@ fn tray_icon() -> anyhow::Result<tray_icon::Icon> {
 }
 
 /// Runs the UI message loop on the calling thread until Quit.
-pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions) -> anyhow::Result<()> {
+pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate::config::Paths) -> anyhow::Result<()> {
     use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
     unsafe {
         let class = WNDCLASSW {
@@ -205,18 +223,32 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions) -> anyhow::Res
         RegisterClassW(&class);
         let mut card = Layered::create()?;
         let mut toast = Layered::create()?;
+        let unavailable = || actions.tracker_toast("TarkovTracker window unavailable", "WebView2 missing? see log.txt", true);
+        // Built before the card window is published: WebView2 creation pumps messages, and anything
+        // queued meanwhile is drained by the WM_APP posted below.
+        let mut tracker = match super::tracker::Tracker::create(paths, ui.tracker.clone()) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                log::error!("TarkovTracker window: {e:#}");
+                unavailable();
+                None
+            }
+        };
         ui.hwnd.store(card.hwnd.0 as isize, Ordering::Release);
+        let _ = PostMessageW(card.hwnd, WM_APP, WPARAM(0), LPARAM(0));
         SetTimer(card.hwnd, 1, 50, None);
         // Thread hotkey (no window): WM_HOTKEY arrives with a null hwnd.
         if let Err(e) = RegisterHotKey(None, DEBUG_HOTKEY, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_F12.0 as u32) {
             log::warn!("Ctrl+Shift+F12 unavailable (taken by another program?): {e}");
         }
 
+        let tracker_item = MenuItem::new("TarkovTracker", true, None);
         let settings = MenuItem::new("Settings", true, None);
         let pause = CheckMenuItem::new("Pause scanning", true, false, None);
+        let update = MenuItem::new("Check for updates", true, None);
         let quit = MenuItem::new("Quit", true, None);
         let menu = Menu::new();
-        menu.append_items(&[&settings, &pause, &PredefinedMenuItem::separator(), &quit])?;
+        menu.append_items(&[&tracker_item, &settings, &pause, &update, &PredefinedMenuItem::separator(), &quit])?;
         let _tray = tray_icon::TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip("ChadScanner")
@@ -228,6 +260,12 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions) -> anyhow::Res
         let mut toast_until: Option<Instant> = None;
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            if let Some(t) = tracker.as_mut() {
+                if msg.hwnd == t.hwnd() && msg.message == super::tracker::WM_TRACKER_CLOSE {
+                    t.hide();
+                    continue;
+                }
+            }
             if msg.message == WM_HOTKEY && msg.wParam.0 == DEBUG_HOTKEY as usize {
                 actions.debug_report();
                 continue;
@@ -251,12 +289,34 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions) -> anyhow::Res
                             toast.show(&pix, x, t + 40);
                             toast_until = Some(Instant::now() + Duration::from_secs_f32(TOAST_SECONDS));
                         }
+                        Cmd::TrackerItem { id, name } => {
+                            if let Some(t) = tracker.as_mut() {
+                                t.item(&id, &name);
+                            }
+                        }
+                        Cmd::TrackerStep { up, overfill } => match tracker.as_mut() {
+                            None => unavailable(),
+                            Some(t) if !t.has_item() => actions.tracker_toast("Scan an item first", "", true),
+                            Some(t) => t.step(up, overfill),
+                        },
+                        Cmd::UpdateLabel(t) => update.set_text(t),
+                        Cmd::Quit => PostQuitMessage(0),
                     }
                 }
                 continue;
             }
             if msg.hwnd == card.hwnd && msg.message == WM_TIMER {
                 let now = Instant::now();
+                if let Some(t) = tracker.as_mut() {
+                    t.tick(now);
+                    for m in t.drain() {
+                        match crate::tracker::parse(&m) {
+                            Some(crate::tracker::Message::Toast { title, body, warn }) => actions.tracker_toast(&title, &body, warn),
+                            Some(crate::tracker::Message::Log(s)) => log::info!("{s}"),
+                            None => log::warn!("tracker: unknown message {m}"),
+                        }
+                    }
+                }
                 if let Some((until, at, on_leave)) = card_until {
                     let (cx, cy) = super::cursor_pos();
                     let moved = on_leave && (cx - at.0).pow(2) + (cy - at.1).pow(2) > LEAVE_PX * LEAVE_PX;
@@ -270,10 +330,17 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions) -> anyhow::Res
                     toast_until = None;
                 }
                 while let Ok(e) = MenuEvent::receiver().try_recv() {
-                    if e.id == *settings.id() {
+                    if e.id == *tracker_item.id() {
+                        match &tracker {
+                            Some(t) => t.show(),
+                            None => unavailable(),
+                        }
+                    } else if e.id == *settings.id() {
                         actions.open_settings();
                     } else if e.id == *pause.id() {
                         actions.set_paused(pause.is_checked());
+                    } else if e.id == *update.id() {
+                        actions.update();
                     } else if e.id == *quit.id() {
                         PostQuitMessage(0);
                     }
@@ -282,6 +349,9 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions) -> anyhow::Res
             }
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
+        }
+        if let Some(t) = &tracker {
+            t.save_rect();
         }
     }
     Ok(())

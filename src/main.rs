@@ -10,6 +10,8 @@ mod eftlog;
 mod needs;
 mod progress;
 mod secret;
+mod tracker;
+mod update;
 
 #[cfg(windows)]
 mod app;
@@ -59,19 +61,39 @@ fn run() -> anyhow::Result<()> {
     if settings_mode {
         return settings::run(paths);
     }
-    if !single_instance() {
+    let after_update = std::env::args().any(|a| a == "--after-update");
+    // After an update the old process may still be exiting; wait for its mutex.
+    let wait = if after_update { std::time::Duration::from_secs(15) } else { std::time::Duration::ZERO };
+    if !single_instance(wait) {
         log::warn!("ChadScanner is already running");
         return Ok(());
     }
     log::info!("ChadScanner {} starting; data {}", env!("CARGO_PKG_VERSION"), paths.data.display());
+    let finished = update::finish(&paths.install);
 
     let font = load_fonts()?;
     let cfg = config::Config::load(&paths.config());
     let (ui, ui_rx) = win::ui::Ui::new();
     let app = app::App::new(paths.clone(), cfg.clone(), ui.clone(), font);
+    match finished {
+        Ok(true) => app.toast(&format!("Updated to v{}", env!("CARGO_PKG_VERSION")), "", card::GREEN),
+        Ok(false) => {}
+        Err(e) => {
+            log::error!("finishing update: {e:#}");
+            app.toast("Update incomplete", "see log.txt", card::RED);
+        }
+    }
 
     let loader = app.clone();
     std::thread::Builder::new().name("engine".into()).spawn(move || {
+        if !loader.paths.data.join("refs").join("catalog.json").exists() {
+            loader.toast("Downloading item data", "one-time, about 180 MB", card::AMBER);
+            if let Err(e) = update::agent().and_then(|a| update::install_data(&a, &loader.paths.install)) {
+                log::error!("item data download: {e:#}");
+                loader.toast("Item data download failed", "see log.txt – restart to retry", card::RED);
+                return;
+            }
+        }
         let t = std::time::Instant::now();
         match chadvision::engine::Engine::open(&loader.paths.data) {
             Ok(e) => {
@@ -95,24 +117,39 @@ fn run() -> anyhow::Result<()> {
     let (step_tx, step_rx) = std::sync::mpsc::channel();
     let steps = app.clone();
     std::thread::Builder::new().name("steps".into()).spawn(move || steps.step_worker(step_rx))?;
+    let upd = app.clone();
+    std::thread::Builder::new().name("update".into()).spawn(move || upd.update_worker())?;
     win::hook::start(scan_tx, step_tx, cfg.hotkey, cfg.progress_keys);
 
     let actions: Arc<app::App> = app;
-    win::ui::run(&ui, ui_rx, &actions)?;
+    win::ui::run(&ui, ui_rx, &actions, &paths)?;
     actions.shutdown();
     log::info!("quit");
     Ok(())
 }
 
 /// One overlay per user session: a second one would double the hook and the tooltips.
+/// Retries for `wait` (the previous process may still be exiting).
 #[cfg(windows)]
-fn single_instance() -> bool {
+fn single_instance(wait: std::time::Duration) -> bool {
     use windows::core::w;
-    use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
+    use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
     use windows::Win32::System::Threading::CreateMutexW;
-    unsafe {
-        // Leaked on purpose: held for the life of the process.
-        let _ = CreateMutexW(None, true, w!("Local\\ChadScanner"));
-        GetLastError() != ERROR_ALREADY_EXISTS
+    let start = std::time::Instant::now();
+    loop {
+        unsafe {
+            let handle = CreateMutexW(None, true, w!("Local\\ChadScanner"));
+            if GetLastError() != ERROR_ALREADY_EXISTS {
+                // Leaked on purpose: held for the life of the process.
+                return true;
+            }
+            if let Ok(h) = handle {
+                let _ = CloseHandle(h);
+            }
+        }
+        if start.elapsed() >= wait {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
     }
 }

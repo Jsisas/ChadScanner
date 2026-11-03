@@ -51,6 +51,10 @@ pub struct App {
     last_step: Mutex<Option<(String, String)>>,
     /// Serialises mode switches.
     switch: Mutex<()>,
+    /// Newest release found by the update check; the tray item installs it.
+    update_available: Mutex<Option<crate::update::Manifest>>,
+    /// Set while a tray-triggered check or install runs.
+    updating: AtomicBool,
 }
 
 impl App {
@@ -80,6 +84,8 @@ impl App {
                 last_item: Mutex::new(None),
                 last_step: Mutex::new(None),
                 switch: Mutex::new(()),
+                update_available: Mutex::new(None),
+                updating: AtomicBool::new(false),
             }
         });
         app.rebuild_progress();
@@ -266,6 +272,7 @@ impl App {
         src.refresh_if_stale();
         let c = card::item_card(&cat, item, top, &src.snapshot(), &opts);
         self.show_card(&c, at, Some(seconds).filter(|s| *s > 0.0));
+        self.ui.send(ui::Cmd::TrackerItem { id: item.id.clone(), name: item.name.clone() });
         *self.last_item.lock().unwrap() = Some((item.id.clone(), at, top));
         let shown = format!("shown: {} ({})", item.short_name, item.id);
         Ok((Some(shot), cands, shown))
@@ -273,14 +280,22 @@ impl App {
 
     // ------------------------------------------------------------ quest progress keys
 
-    /// Arrow Up / Down presses, one at a time so quick presses write counts in order.
+    /// Arrow Up / Down presses, one at a time so quick presses write counts in order: the TarkovTracker
+    /// window's open item while it is shown, else quest progress via `step`.
     pub fn step_worker(self: Arc<Self>, rx: Receiver<win::hook::Step>) {
         for step in rx {
             // Arrow keys are everywhere; only EFT focus is worth acting on.
             if self.paused.load(Ordering::Relaxed) || !win::eft_in_foreground() {
                 continue;
             }
-            self.step(if step == win::hook::Step::Up { 1 } else { -1 });
+            let up = step == win::hook::Step::Up;
+            if self.ui.tracker_open() {
+                let overfill = self.cfg.read().unwrap().overfill_fir;
+                log::info!("tracker key: {}", if up { "up" } else { "down" });
+                self.ui.send(ui::Cmd::TrackerStep { up, overfill });
+            } else {
+                self.step(if up { 1 } else { -1 });
+            }
         }
     }
 
@@ -551,6 +566,63 @@ impl App {
     }
 }
 
+// ------------------------------------------------------------ updates
+
+impl App {
+    /// Checks GitHub 30 s after start and every 6 h.
+    pub fn update_worker(self: Arc<Self>) {
+        std::thread::sleep(Duration::from_secs(30));
+        loop {
+            self.check_update(false);
+            std::thread::sleep(Duration::from_secs(6 * 3600));
+        }
+    }
+
+    /// `manual`: the user asked, so failures and "up to date" are shown too.
+    fn check_update(&self, manual: bool) {
+        let current = env!("CARGO_PKG_VERSION");
+        let manifest = crate::update::agent().and_then(|a| crate::update::fetch_manifest(&a, None));
+        match manifest {
+            Err(e) => {
+                log::warn!("update check: {e:#}");
+                if manual {
+                    self.toast("Update check failed", "see log.txt", card::RED);
+                }
+            }
+            Ok(m) if crate::update::is_newer(&m.version, current) => {
+                let changed = self.update_available.lock().unwrap().replace(m.clone()).as_ref() != Some(&m);
+                if changed || manual {
+                    log::info!("update available: v{}", m.version);
+                    self.toast(&format!("Update available: v{}", m.version), "tray → Update", card::GREEN);
+                    self.ui.send(ui::Cmd::UpdateLabel(format!("Update to v{}", m.version)));
+                }
+            }
+            Ok(_) => {
+                if manual {
+                    self.toast("ChadScanner is up to date", &format!("v{current}"), card::TEXT);
+                }
+            }
+        }
+    }
+
+    /// Downloads release `m`, swaps the exe and starts the new one; this process then quits.
+    fn apply_update(&self, m: &crate::update::Manifest) -> anyhow::Result<()> {
+        let install = &self.paths.install;
+        let data_needed = crate::update::installed_data_key(install).as_deref() != Some(m.data.key.as_str());
+        let mb = (m.app.size + if data_needed { m.data.size } else { 0 }) / 1_000_000;
+        self.toast(&format!("Downloading v{}", m.version), &format!("{mb} MB"), card::AMBER);
+        let agent = crate::update::agent()?;
+        crate::update::stage(&agent, m, install)?;
+        // Resolved before the swap: afterwards the running image may report its renamed `.exe.old` path.
+        let exe = std::env::current_exe()?;
+        crate::update::swap_exe(&exe, install)?;
+        std::process::Command::new(&exe).arg("--after-update").spawn()?;
+        log::info!("updating to v{}; restarting", m.version);
+        self.ui.send(ui::Cmd::Quit);
+        Ok(())
+    }
+}
+
 impl ui::TrayActions for Arc<App> {
     fn open_settings(&self) {
         let mut child = self.settings.lock().unwrap();
@@ -565,6 +637,37 @@ impl ui::TrayActions for Arc<App> {
 
     fn debug_report(&self) {
         App::debug_report(self);
+    }
+
+    fn tracker_toast(&self, title: &str, body: &str, warn: bool) {
+        self.toast(title, body, if warn { card::AMBER } else { card::GREEN });
+    }
+
+    fn update(&self) {
+        if self.updating.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let app = Arc::clone(self);
+        let spawned = std::thread::Builder::new().name("update-apply".into()).spawn({
+            let app = app.clone();
+            move || {
+                let pending = app.update_available.lock().unwrap().clone();
+                match pending {
+                    Some(m) => {
+                        if let Err(e) = app.apply_update(&m) {
+                            log::error!("update failed: {e:#}");
+                            app.toast("Update failed", "see log.txt", card::RED);
+                        }
+                    }
+                    None => app.check_update(true),
+                }
+                app.updating.store(false, Ordering::Release);
+            }
+        });
+        if let Err(e) = spawned {
+            log::error!("update thread: {e}");
+            app.updating.store(false, Ordering::Release);
+        }
     }
 
     fn set_paused(&self, paused: bool) {

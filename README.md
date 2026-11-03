@@ -35,11 +35,21 @@ Barters 3 · Crafts 5
 
 ## Install
 
-1. Build and publish from WSL (see below), or copy a published folder to `C:\ChadScanner`.
-2. Set EFT to **Borderless** (Settings → Graphics → Screen mode). Exclusive fullscreen is not supported:
+1. Download `chadscanner-<version>-win-x64.zip` from
+   [Releases](https://github.com/Jsisas/ChadScanner/releases/latest) and extract it to a folder you own,
+   e.g. `C:\ChadScanner`. Not Program Files: updates rewrite this folder.
+2. Run `chadscanner.exe`. SmartScreen warns about an unsigned app: **More info → Run anyway**. The first
+   start downloads the item data (~180 MB) into `data\`.
+3. Set EFT to **Borderless** (Settings → Graphics → Screen mode). Exclusive fullscreen is not supported:
    the card is a normal topmost window and cannot be drawn over an exclusive-fullscreen game.
-3. Run `C:\ChadScanner\chadscanner.exe`. It sits in the tray; right-click for **Settings**,
-   **Pause scanning** and **Quit**.
+4. ChadScanner sits in the tray; right-click for **Settings**, **Pause scanning**, **Check for updates**
+   and **Quit**.
+
+## Updates
+
+The app checks GitHub 30 s after start and every 6 h. A newer release shows a toast and the tray item
+becomes **Update to vX.Y.Z**; clicking it downloads, swaps the files and restarts. The item data is
+downloaded again only when its key (`data\key.txt`) changed. **Check for updates** checks on demand.
 
 ## Settings
 
@@ -74,6 +84,19 @@ With TarkovTracker as the source a change shows on the card at once and is confi
 the last write; if the server does not report what was written, the server's value wins and the
 disagreement is logged and toasted.
 
+## TarkovTracker window
+
+A second window, **ChadScanner · TarkovTracker**, embeds tarkovtracker.org (WebView2) so no separate browser is
+needed. It opens at start; closing it hides it, and the tray item **TarkovTracker** brings it back. Log in once
+(Discord, GitHub, Twitch or email; Google may be refused inside WebView2); the login is kept. The site must be set
+to English.
+
+- A scan opens the item's Needed-Items view in the window.
+- While the window is open and EFT is focused, **Arrow Up / Down** change that item's FIR / Non-FIR count there
+  (FIR first, then non-FIR when *Scanning → continue into non-FIR ones* is on) instead of the quest-progress keys above.
+  **Smart Fill** is clicked 1.5 s after the last press. With the window closed the keys work as described above.
+- Counts changed in the window are not applied to the card until its next progress read.
+
 ## Debug report
 
 Press **Ctrl + Shift + F12** right after a scan that went wrong. It saves
@@ -93,6 +116,13 @@ Needs rustup, `lld` (`lld-link`), curl and unzip; the script installs the Window
 `cargo-xwin`, prepares ChadVision's models and index, and copies the ONNX Runtime DLL. Quit the app first
 (the exe is locked while it runs).
 
+### Release
+
+Bump `version` in `Cargo.toml`, commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
+`.github/workflows/release.yml` builds with `tools/deploy-wsl.sh` and publishes with
+`tools/package-release.sh` (app zip, data zip when the data changed, `manifest.json`). Do not delete old
+releases: a newer manifest may point to an older release's data zip.
+
 `cargo test` runs the platform-independent parts (data parsing, needs, progress store, log parsing, card
 layout) on Linux.
 
@@ -100,8 +130,8 @@ layout) on Linux.
 
 | Where | What |
 |---|---|
-| `C:\ChadScanner\` | `chadscanner.exe`, `onnxruntime.dll`, `data\` (models, index, item images) |
-| `%APPDATA%\ChadScanner\` | `config.json`, `progress.json`, `pending.json` (TarkovTracker writes waiting for retry), `logstate.json` (EFT log read position), `cache\` (tarkov.dev data), `reports\`, `log.txt` |
+| `C:\ChadScanner\` | `chadscanner.exe`, `onnxruntime.dll`, `data\` (models, index, item images, `key.txt`) |
+| `%APPDATA%\ChadScanner\` | `config.json`, `progress.json`, `pending.json` (TarkovTracker writes waiting for retry), `logstate.json` (EFT log read position), `tracker-window.json` (TarkovTracker window position), `webview\` (its browser profile: keeps the login), `cache\` (tarkov.dev data), `reports\`, `log.txt` |
 
 ## Data sources
 
