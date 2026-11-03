@@ -316,6 +316,40 @@ const READ_RESERVE: u32 = 100;
 /// A scan waits at most this long for the re-read; otherwise the last snapshot is shown.
 const SCAN_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// A write is confirmed against the server this long after the latest write.
+const SYNC_AFTER_WRITE: Duration = Duration::from_secs(30);
+
+/// Outcome of `TrackerSource::write`: on the server already, or waiting in the retry queue.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Sent {
+    Now,
+    Queued,
+}
+
+/// What the server reports differently from what was written to it, one line each.
+fn unsynced(objs: &HashMap<String, ObjectiveProgress>, tasks: &HashMap<String, TaskProgress>, server: &Progress) -> Vec<String> {
+    let mut out = Vec::new();
+    for (id, w) in objs {
+        let s = server.objectives.get(id).filter(|e| !e.invalid).copied().unwrap_or_default();
+        if s.complete != w.complete || s.count != w.count {
+            out.push(format!(
+                "objective {id}: wrote complete={} count={}, server has complete={} count={}",
+                w.complete, w.count, s.complete, s.count
+            ));
+        }
+    }
+    for (id, w) in tasks {
+        let s = server.tasks.get(id).copied().unwrap_or_default();
+        if s.complete != w.complete || s.failed != w.failed {
+            out.push(format!(
+                "task {id}: wrote complete={} failed={}, server has complete={} failed={}",
+                w.complete, w.failed, s.complete, s.failed
+            ));
+        }
+    }
+    out
+}
+
 /// A write that failed with a retryable error, persisted across restarts.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Pending {
@@ -335,6 +369,11 @@ struct TrackerState {
     reads_paused_until: Option<std::time::Instant>,
     /// Earliest time the pending queue may be retried.
     retry_at: Option<std::time::Instant>,
+    /// Objectives / tasks the server accepted since the last read, to compare against its next answer.
+    written_objectives: HashMap<String, ObjectiveProgress>,
+    written_tasks: HashMap<String, TaskProgress>,
+    /// When the confirming read is due; set by every write, cleared by a read.
+    sync_at: Option<std::time::Instant>,
 }
 
 pub struct TrackerSource {
@@ -407,6 +446,9 @@ impl TrackerSource {
                 reads_left: None,
                 reads_paused_until: None,
                 retry_at: None,
+                written_objectives: HashMap::new(),
+                written_tasks: HashMap::new(),
+                sync_at: None,
             }),
             queue_lock: Mutex::new(()),
         });
@@ -417,7 +459,8 @@ impl TrackerSource {
                 let mut last_poll: Option<std::time::Instant> = None;
                 loop {
                     let Some(src) = weak.upgrade() else { return };
-                    if last_poll.is_none_or(|t| t.elapsed() >= POLL) {
+                    let sync_due = src.state.lock().unwrap().sync_at.is_some_and(|t| std::time::Instant::now() >= t);
+                    if sync_due || last_poll.is_none_or(|t| t.elapsed() >= POLL) {
                         src.refresh();
                         last_poll = Some(std::time::Instant::now());
                     }
@@ -445,6 +488,7 @@ impl TrackerSource {
                 return;
             }
             st.last_refresh = Some(std::time::Instant::now());
+            st.sync_at = None;
             st.etag.clone()
         };
         let note_quota = |r: &ureq::Response| {
@@ -463,9 +507,23 @@ impl TrackerSource {
                 let tag = r.header("ETag").map(str::to_owned);
                 match r.into_json::<Value>() {
                     Ok(v) => {
-                        let mut st = self.state.lock().unwrap();
-                        st.snapshot = Arc::new(parse_tracker(&v));
-                        st.etag = tag;
+                        let parsed = parse_tracker(&v);
+                        // The server wins; whatever it did not keep is reported.
+                        let bad = {
+                            let mut st = self.state.lock().unwrap();
+                            let bad = unsynced(&st.written_objectives, &st.written_tasks, &parsed);
+                            st.written_objectives.clear();
+                            st.written_tasks.clear();
+                            st.snapshot = Arc::new(parsed);
+                            st.etag = tag;
+                            bad
+                        };
+                        for line in &bad {
+                            log::warn!("TarkovTracker {}: server disagrees with {line}", self.mode.key());
+                        }
+                        if !bad.is_empty() {
+                            (self.notify)(&format!("TarkovTracker did not keep {} change(s)", bad.len()), "see log.txt");
+                        }
                     }
                     Err(e) => log::warn!("TarkovTracker {}: progress unreadable: {e}", self.mode.key()),
                 }
@@ -520,7 +578,7 @@ impl TrackerSource {
         }
     }
 
-    fn write(&self, path: String, body: Value, what: String) -> anyhow::Result<()> {
+    fn write(&self, path: String, body: Value, what: String) -> anyhow::Result<Sent> {
         let queued = {
             let _g = self.queue_lock.lock().unwrap();
             self.load_queue().iter().any(|p| p.mode == self.mode)
@@ -528,17 +586,14 @@ impl TrackerSource {
         // Keep order: while older writes wait, queue behind them.
         if queued {
             self.enqueue(Pending { mode: self.mode, path, body, what: what.clone() }, None);
-            return Ok(());
+            return Ok(Sent::Queued);
         }
         match self.post(&path, &body, &what) {
-            Ok(()) => {
-                self.refresh();
-                Ok(())
-            }
+            Ok(()) => Ok(Sent::Now),
             Err(WriteError::Retry(wait, why)) => {
                 self.enqueue(Pending { mode: self.mode, path, body, what }, Some(wait));
                 log::info!("queued for retry ({why})");
-                Ok(())
+                Ok(Sent::Queued)
             }
             Err(WriteError::Fatal(why)) => {
                 if why.starts_with("401") || why.starts_with("403") {
@@ -547,6 +602,17 @@ impl TrackerSource {
                 anyhow::bail!("TarkovTracker {what}: {why}")
             }
         }
+    }
+
+    /// Shows a write at once: edits a copy of the snapshot, drops the ETag (a 304 would restore the
+    /// pre-write copy) and schedules the confirming read `SYNC_AFTER_WRITE` after the latest write.
+    fn apply(&self, f: impl FnOnce(&mut Progress, &mut TrackerState)) {
+        let mut st = self.state.lock().unwrap();
+        let mut snap = (*st.snapshot).clone();
+        f(&mut snap, &mut st);
+        st.snapshot = Arc::new(snap);
+        st.etag = None;
+        st.sync_at = Some(std::time::Instant::now() + SYNC_AFTER_WRITE);
     }
 
     fn enqueue(&self, p: Pending, wait: Option<Duration>) {
@@ -590,7 +656,9 @@ impl TrackerSource {
         self.save_queue(&q);
         drop(_g);
         if sent {
-            self.refresh();
+            let mut st = self.state.lock().unwrap();
+            st.etag = None;
+            st.sync_at = Some(std::time::Instant::now() + SYNC_AFTER_WRITE);
         }
     }
 }
@@ -601,16 +669,33 @@ impl ProgressSource for TrackerSource {
     }
 
     fn set_task(&self, id: &str, state: TaskState) -> anyhow::Result<()> {
-        self.write(format!("/progress/task/{id}"), json!({"state": state.api()}), format!("task {id} -> {}", state.api()))
+        let sent = self.write(format!("/progress/task/{id}"), json!({"state": state.api()}), format!("task {id} -> {}", state.api()))?;
+        self.apply(|p, st| {
+            // The API marks a failed task complete + failed.
+            let v = TaskProgress { complete: true, failed: state == TaskState::Failed, invalid: false };
+            p.tasks.insert(id.into(), v);
+            if sent == Sent::Now {
+                st.written_tasks.insert(id.into(), v);
+            }
+        });
+        Ok(())
     }
 
     fn set_objective(&self, id: &str, complete: bool, count: u32) -> anyhow::Result<()> {
         let state = if complete { "completed" } else { "uncompleted" };
-        self.write(
+        let sent = self.write(
             format!("/progress/task/objective/{id}"),
             json!({"state": state, "count": count}),
             format!("objective {id} -> {state} ({count})"),
-        )
+        )?;
+        self.apply(|p, st| {
+            let v = ObjectiveProgress { complete, count, invalid: false };
+            p.objectives.insert(id.into(), v);
+            if sent == Sent::Now {
+                st.written_objectives.insert(id.into(), v);
+            }
+        });
+        Ok(())
     }
 
     fn set_hideout_level(&self, _station_id: &str, _level: u8) -> anyhow::Result<()> {
@@ -618,7 +703,9 @@ impl ProgressSource for TrackerSource {
     }
 
     fn set_level(&self, level: u8) -> anyhow::Result<()> {
-        self.write(format!("/progress/level/{level}"), json!({}), format!("level -> {level}"))
+        self.write(format!("/progress/level/{level}"), json!({}), format!("level -> {level}"))?;
+        self.apply(|p, _| p.level = Some(level));
+        Ok(())
     }
 
     fn writes_objectives(&self) -> bool {
@@ -628,7 +715,10 @@ impl ProgressSource for TrackerSource {
     fn refresh_if_stale(&self) {
         let due = {
             let st = self.state.lock().unwrap();
-            st.last_refresh.is_none_or(|t| t.elapsed() >= SCAN_FRESH) && st.reads_left.is_none_or(|n| n > READ_RESERVE)
+            // Inside the post-write window the optimistic snapshot is shown and no read is spent.
+            st.sync_at.is_none()
+                && st.last_refresh.is_none_or(|t| t.elapsed() >= SCAN_FRESH)
+                && st.reads_left.is_none_or(|n| n > READ_RESERVE)
         };
         if due {
             self.refresh_within(SCAN_TIMEOUT);
@@ -703,5 +793,16 @@ mod tests {
         assert_eq!(p.objectives["o"].count, 2);
         assert_eq!(p.hideout_modules, HashSet::from(["s-1".to_owned()]));
         assert_eq!((p.level, p.faction.as_deref()), (Some(17), Some("BEAR")));
+    }
+
+    #[test]
+    fn unsynced_reports_only_disagreements() {
+        let o = |count| ObjectiveProgress { complete: false, count, invalid: false };
+        let written = HashMap::from([("o1".to_owned(), o(2)), ("o2".to_owned(), o(1))]);
+        let mut server = Progress::default();
+        server.objectives.insert("o1".into(), o(2));
+        let bad = unsynced(&written, &HashMap::new(), &server);
+        assert_eq!(bad.len(), 1);
+        assert!(bad[0].contains("objective o2: wrote complete=false count=1, server has complete=false count=0"), "{bad:?}");
     }
 }
