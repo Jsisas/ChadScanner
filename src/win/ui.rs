@@ -27,6 +27,8 @@ pub enum Cmd {
     /// (if `close_on_leave`), or by the next scan.
     Card { pix: Pixmap, at: (i32, i32), seconds: Option<f32>, close_on_leave: bool },
     HideCard,
+    /// Replaces the shown card's pixels in place; ignored when no card is shown.
+    Redraw(Pixmap),
     /// Top-centre of the primary monitor for 4 s.
     Toast(Pixmap),
     /// New text of the tray's update item.
@@ -285,6 +287,12 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                             card.show(&pix, x, y);
                             let deadline = seconds.map(|s| Instant::now() + Duration::from_secs_f32(s));
                             card_until = Some((deadline, at, close_on_leave));
+                        }
+                        Cmd::Redraw(pix) => {
+                            if let Some((_, at, _)) = card_until {
+                                let (x, y) = place(at, pix.width() as i32, pix.height() as i32);
+                                card.show(&pix, x, y);
+                            }
                         }
                         Cmd::HideCard => {
                             card.hide();

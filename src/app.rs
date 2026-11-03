@@ -203,6 +203,7 @@ impl App {
                 (None, Vec::new(), "ignored: EscapeFromTarkov.exe was not the foreground window".to_owned())
             } else {
                 self.ui.send(ui::Cmd::HideCard);
+                *self.last_item.lock().unwrap() = None;
                 match self.scan(req) {
                     Ok(r) => r,
                     Err(e) => {
@@ -272,9 +273,9 @@ impl App {
         // Picks up counts just marked on tarkovtracker.org (ETag, rate-limited).
         src.refresh_if_stale();
         let c = card::item_card(&cat, item, top, &src.snapshot(), &opts);
+        *self.last_item.lock().unwrap() = Some((item.id.clone(), at, top));
         self.show_card(&c, at, Some(seconds).filter(|s| *s > 0.0));
         self.ui.send(ui::Cmd::TrackerItem { id: item.id.clone(), name: item.name.clone() });
-        *self.last_item.lock().unwrap() = Some((item.id.clone(), at, top));
         let shown = format!("shown: {} ({})", item.short_name, item.id);
         Ok((Some(shot), cands, shown))
     }
@@ -344,17 +345,18 @@ impl App {
         self.redraw_last_card();
     }
 
-    /// Redraws the last scanned item's card from the current progress snapshot.
+    /// Refreshes the shown card of the last scanned item from the current progress snapshot;
+    /// does nothing once that card is gone.
     fn redraw_last_card(&self) {
-        let Some((item_id, at, score)) = self.last_item.lock().unwrap().clone() else { return };
+        let Some((item_id, _, score)) = self.last_item.lock().unwrap().clone() else { return };
         let Some(cat) = self.store.read().unwrap().get() else { return };
         let Some(item) = cat.items.get(&item_id) else { return };
-        let (opts, seconds) = {
+        let (opts, scale) = {
             let c = self.cfg.read().unwrap();
-            (card::CardOptions::from_config(&c), c.tooltip_seconds)
+            (card::CardOptions::from_config(&c), c.ui_scale)
         };
         let c = card::item_card(&cat, item, score, &self.progress().snapshot(), &opts);
-        self.show_card(&c, at, Some(seconds).filter(|s| *s > 0.0));
+        self.ui.send(ui::Cmd::Redraw(card::render(&c, &self.font, scale)));
     }
 
     /// Ctrl+Shift+F12: writes the last scan (screenshot, candidates, decision), the screen now
