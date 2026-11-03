@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChadScanner — Shift-click your Tarkov stash like a Chad</title>
+  <meta name="description"
+    content="Free, open-source Windows app for Escape from Tarkov. Shift + click an item and a big card shows how many you still need for quests and hideout, and what it's worth. Screenshot + OCR only.">
+  <meta name="theme-color" content="#0b0d0e">
+  <meta property="og:title" content="ChadScanner — Shift-click your Tarkov stash like a Chad">
+  <meta property="og:description"
+    content="Free, open-source Windows app for Escape from Tarkov. Shift + click an item and a big card shows how many you still need for quests and hideout, and what it's worth. Screenshot + OCR only.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://jsisas.github.io/ChadScanner/">
+  <meta property="og:image" content="https://jsisas.github.io/ChadScanner/icon-256.png">
+  <meta name="twitter:card" content="summary">
+  <link rel="canonical" href="https://jsisas.github.io/ChadScanner/">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icon-32.png" sizes="32x32" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script src="main.js" defer></script>
+</head>
+
+<body>
+
+  <header class="site-header">
+    <div class="wrap bar">
+      <a class="brand" href="#top"><img src="icon.svg" alt="" width="32" height="32"><span>ChadScanner</span></a>
+      <nav aria-label="Primary">
+        <a class="nav-link" href="#card">The card</a>
+        <a class="nav-link" href="#features">Features</a>
+        <a class="nav-link" href="#install">Install</a>
+        <a class="nav-link" href="#faq">FAQ</a>
+        <a class="btn btn-secondary btn-sm" href="https://github.com/Jsisas/ChadScanner">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" id="top">
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <h1>Shift-click your stash like a Chad.</h1>
+          <p class="lead">Shift + click any item and ChadScanner slams a big card next to it: how many you still need
+            for quests and hideout, and what it's worth. No wiki. No alt-tab. No spreadsheet. Just answers.</p>
+          <div class="cta-row">
+            <a class="btn btn-primary" id="download-btn"
+              href="https://github.com/Jsisas/ChadScanner/releases/latest">Download</a>
+            <a class="btn btn-secondary" href="https://github.com/Jsisas/ChadScanner">Source on GitHub</a>
+          </div>
+          <p class="meta" id="download-meta">Windows 10/11 · x64 · free forever</p>
+          <ul class="chips">
+            <li><b>Screenshot + OCR</b> only</li>
+            <li><b>Zero</b> memory reading</li>
+            <li><b>Open</b> source</li>
+          </ul>
+        </div>
+
+        <div class="scene" aria-hidden="false">
+          <div class="stash">
+            <div class="item"><span>NaCl</span></div>
+            <svg class="cursor" width="22" height="28" viewBox="0 0 22 28" aria-hidden="true">
+              <path d="M2 2v21l5.5-5 4 8.5 3.5-1.7-4-8.3H19z" fill="#f2f2f2" stroke="#0b0d0e" stroke-width="2"
+                stroke-linejoin="round" />
+            </svg>
+            <span class="ripple"></span>
+          </div>
+          <div class="card scene-card" style="--state: var(--amber)" role="img"
+            aria-label="ChadScanner card for NaCl: 27 needed. Quests: 4 now, 3 first in line, 3 thirsty. Hideout: 6 for Medstation 2 now, 10 for Medstation 3. Flea 94 666 roubles, Therapist 4 339 roubles.">
+            <div class="c-row c-title"><span>NaCl</span><span class="c-r c-muted">27×&nbsp;needed</span></div>
+            <div class="c-label">QUESTS</div>
+            <div class="c-row c-now"><span>4×&nbsp;&nbsp;Pets Won't Need It</span><span class="c-r">FIR · now</span>
+            </div>
+            <div class="c-row"><span>3×&nbsp;&nbsp;First in Line</span><span class="c-r">FIR · trader dialogue</span>
+            </div>
+            <div class="c-row"><span>3×&nbsp;&nbsp;Thirsty - Secrets</span><span class="c-r">FIR · 4 quests</span></div>
+            <div class="c-label">HIDEOUT</div>
+            <div class="c-row c-now"><span>6×&nbsp;&nbsp;Medstation 2</span><span class="c-r">now</span></div>
+            <div class="c-row"><span>10×&nbsp;Medstation 3</span><span class="c-r">3 upgrades</span></div>
+            <hr class="c-rule">
+            <div class="c-row c-foot"><span>Flea 94&thinsp;666&nbsp;₽</span><span class="c-r">Therapist
+                4&thinsp;339&nbsp;₽</span></div>
+            <div class="c-recipes">Barters 3 · Crafts 5</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="band" id="safety">
+      <div class="wrap">
+        <div class="safety-box">
+          <h2>Zero ban risk. It only looks at your screen.</h2>
+          <p>ChadScanner takes a screenshot around your cursor and reads it with image recognition and OCR — the same
+            pixels your eyes already see. It never reads or writes game memory, never injects anything, never touches
+            game files. OCR is not against Battlestate Games' rules. Don't trust us — read the code. Every line is open
+            for anyone to inspect.</p>
+          <div class="cta-row">
+            <a class="btn btn-secondary" href="https://github.com/Jsisas/ChadScanner">ChadScanner source</a>
+            <a class="btn btn-secondary" href="https://github.com/Jsisas/ChadVision">ChadVision source (the recognition
+              engine)</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="vs">
+      <div class="wrap">
+        <h2>The virgin alt-tabber vs. the Chad scanner</h2>
+        <div class="vs-grid">
+          <div class="vs-col vs-chad">
+            <h3>The Chad scanner</h3>
+            <ul>
+              <li>Shift + click. The card answers.</li>
+              <li>Knows he needs 27 NaCl before he knows what NaCl is</li>
+              <li>Hands in with Arrow Up, undoes with Arrow Down</li>
+              <li>Progress syncs to TarkovTracker by itself</li>
+              <li>Never looks away from his stash</li>
+            </ul>
+          </div>
+          <div class="vs-col vs-virgin">
+            <h3>The virgin alt-tabber</h3>
+            <ul>
+              <li>Alt-tabs to the wiki mid-raid, dies in the inventory screen</li>
+              <li>Sells the gas analyzer he needed for Medstation</li>
+              <li>Keeps a spreadsheet. The spreadsheet is wrong.</li>
+              <li>Asks Discord "is this worth anything?"</li>
+              <li>Forgets which quests still want FIR</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="card">
+      <div class="wrap">
+        <h2>One look. Full intel.</h2>
+        <p class="sub">The border colour tells you what to do before you read a word.</p>
+        <div class="card-grid">
+
+          <figure>
+            <div class="card" style="--state: var(--amber)" role="img"
+              aria-label="Amber card for Gas an.: 5 needed. Quests: 2 Chemical Part 3, 2 Health Care Privacy Part 5. Hideout: 1 Medstation 2 now. Flea 31 200 roubles, Therapist 14 800 roubles. Barters 2, Crafts 1.">
+              <div class="c-row c-title"><span>Gas an.</span><span class="c-r c-muted">5×&nbsp;needed</span></div>
+              <div class="c-label">QUESTS</div>
+              <div class="c-row"><span>2×&nbsp;&nbsp;Chemical - Part 3</span><span class="c-r">FIR · 2 quests</span>
+              </div>
+              <div class="c-row"><span>2×&nbsp;&nbsp;Health Care Privacy - Part 5</span><span class="c-r">FIR · Lv
+                  30</span></div>
+              <div class="c-label">HIDEOUT</div>
+              <div class="c-row c-now"><span>1×&nbsp;&nbsp;Medstation 2</span><span class="c-r">now</span></div>
+              <hr class="c-rule">
+              <div class="c-row c-foot"><span>Flea 31&thinsp;200&nbsp;₽</span><span class="c-r">Therapist
+                  14&thinsp;800&nbsp;₽</span></div>
+              <div class="c-recipes">Barters 2 · Crafts 1</div>
+            </div>
+            <figcaption><i style="--state: var(--amber)"></i><b>Needed now</b> A quest or hideout upgrade you can do
+              right now wants it.</figcaption>
+          </figure>
+
+          <figure>
+            <div class="card" style="--state: var(--purple)" role="img"
+              aria-label="Purple card for Rooster: 1 needed. Quests: 1 Collector. Flea 74 500 roubles, Therapist 21 300 roubles.">
+              <div class="c-row c-title"><span>Rooster</span><span class="c-r c-muted">1×&nbsp;needed</span></div>
+              <div class="c-label">QUESTS</div>
+              <div class="c-row"><span>1×&nbsp;&nbsp;Collector</span><span class="c-r">FIR · 18 quests</span></div>
+              <hr class="c-rule">
+              <div class="c-row c-foot"><span>Flea 74&thinsp;500&nbsp;₽</span><span class="c-r">Therapist
+                  21&thinsp;300&nbsp;₽</span></div>
+            </div>
+            <figcaption><i style="--state: var(--purple)"></i><b>Kappa</b> Needed for a Kappa quest. Keep it.
+            </figcaption>
+          </figure>
+
+          <figure>
+            <div class="card" style="--state: var(--later)" role="img"
+              aria-label="Later-coloured card for Bolts: 24 needed. Hideout: 8 Workbench 3, 16 Air Filtering Unit 1. Flea 12 400 roubles, Mechanic 5 900 roubles. Barters 6, Crafts 2.">
+              <div class="c-row c-title"><span>Bolts</span><span class="c-r c-muted">24×&nbsp;needed</span></div>
+              <div class="c-label">HIDEOUT</div>
+              <div class="c-row"><span>8×&nbsp;&nbsp;Workbench 3</span><span class="c-r">2 upgrades</span></div>
+              <div class="c-row"><span>16× Air Filtering Unit 1</span><span class="c-r">3 upgrades</span></div>
+              <hr class="c-rule">
+              <div class="c-row c-foot"><span>Flea 12&thinsp;400&nbsp;₽</span><span class="c-r">Mechanic
+                  5&thinsp;900&nbsp;₽</span></div>
+              <div class="c-recipes">Barters 6 · Crafts 2</div>
+            </div>
+            <figcaption><i style="--state: var(--later)"></i><b>Later</b> Needed, but nothing you can do with it yet.
+            </figcaption>
+          </figure>
+
+          <figure>
+            <div class="card" style="--state: var(--grey)" role="img"
+              aria-label="Grey card for Matches, not needed. Flea 6 900 roubles, Therapist 3 100 roubles. Crafts 2.">
+              <div class="c-row c-title"><span>Matches</span></div>
+              <hr class="c-rule">
+              <div class="c-row c-foot"><span>Flea 6&thinsp;900&nbsp;₽</span><span class="c-r">Therapist
+                  3&thinsp;100&nbsp;₽</span></div>
+              <div class="c-recipes">Crafts 2</div>
+            </div>
+            <figcaption><i style="--state: var(--grey)"></i><b>Vendor trash</b> Not needed and worth little. Sell it,
+              king.</figcaption>
+          </figure>
+
+          <figure>
+            <div class="card" style="--state: var(--green)" role="img"
+              aria-label="Green card for Roler, not needed. Flea 78 000 roubles, Therapist 41 500 roubles.">
+              <div class="c-row c-title"><span>Roler</span></div>
+              <hr class="c-rule">
+              <div class="c-row c-foot"><span>Flea 78&thinsp;000&nbsp;₽</span><span class="c-r">Therapist
+                  41&thinsp;500&nbsp;₽</span></div>
+            </div>
+            <figcaption><i style="--state: var(--green)"></i><b>Valuable</b> Not needed, but at least
+              30&thinsp;000&nbsp;₽ per slot. Flea it.</figcaption>
+          </figure>
+
+        </div>
+        <p class="footnote">Example values. Real prices update from tarkov.dev every 10 minutes.</p>
+      </div>
+    </section>
+
+    <section class="section" id="features">
+      <div class="wrap">
+        <h2>Built different</h2>
+        <div class="feat-grid">
+          <div class="feat">
+            <h3>Closest goal first</h3>
+            <p>Rows sort by how far away they are: now, then fewest quests, upgrades or levels to go.</p>
+          </div>
+          <div class="feat">
+            <h3>Kappa or Lightkeeper</h3>
+            <p>Set a goal and everything outside it drops to the bottom as NOT KAPPA.</p>
+          </div>
+          <div class="feat">
+            <h3>Knows found-in-raid</h3>
+            <p>FIR objectives fill first. Non-FIR needs can be shown or hidden.</p>
+          </div>
+          <div class="feat">
+            <h3>Arrow Up. Done.</h3>
+            <p>With EFT focused, Arrow Up hands one in to the next open objective; Arrow Down undoes it. The keys still
+              reach the game.</p>
+          </div>
+          <div class="feat">
+            <h3>Synced or local</h3>
+            <p>Keep progress on this PC or on TarkovTracker.org. A built-in TarkovTracker window jumps to the item you
+              just scanned.</p>
+          </div>
+          <div class="feat">
+            <h3>Tracks itself</h3>
+            <p>Reads EFT's own log files to follow quest events and switch PvP/PvE automatically.</p>
+          </div>
+          <div class="feat">
+            <h3>Scan your way</h3>
+            <p>Shift + Left, Alt + Left, Middle, Mouse 4 or Mouse 5.</p>
+          </div>
+          <div class="feat">
+            <h3>Stays current</h3>
+            <p>Checks GitHub on start and every 6 hours; one click swaps the files and restarts.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="install">
+      <div class="wrap">
+        <h2>Four steps to Chad status</h2>
+        <ol class="steps">
+          <li>
+            <h3>Download &amp; extract</h3>
+            <p>Get the zip from Releases and extract it to a folder you own, like <code>C:\ChadScanner</code>. Not
+              Program Files — updates rewrite that folder.</p>
+          </li>
+          <li>
+            <h3>Run it</h3>
+            <p>Start <code>chadscanner.exe</code>. SmartScreen whines about an unsigned app: More info → Run anyway.
+              First start downloads the item data (~180 MB).</p>
+          </li>
+          <li>
+            <h3>Go borderless</h3>
+            <p>In EFT: Settings → Graphics → Screen mode → Borderless. Exclusive fullscreen can't show the card.</p>
+          </li>
+          <li>
+            <h3>Shift + click</h3>
+            <p>ChadScanner lives in the tray. Right-click it for Settings, Pause scanning and Check for updates. Now go
+              loot.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section" id="faq">
+      <div class="wrap faq-wrap">
+        <h2>Questions from the virgins</h2>
+        <details>
+          <summary>Will I get banned?</summary>
+          <p>No. ChadScanner only takes screenshots and runs OCR on them. No memory reading, no injection, no game-file
+            changes, and OCR is not against Battlestate Games' rules. The full source of <a
+              href="https://github.com/Jsisas/ChadScanner">ChadScanner</a> and <a
+              href="https://github.com/Jsisas/ChadVision">ChadVision</a> is on GitHub for anyone to inspect.</p>
+        </details>
+        <details>
+          <summary>Is it free?</summary>
+          <p>Yes. Free, open source, no account, no ads.</p>
+        </details>
+        <details>
+          <summary>The card doesn't show up in game.</summary>
+          <p>Set EFT to Borderless. The card is a normal topmost window and can't draw over exclusive fullscreen.</p>
+        </details>
+        <details>
+          <summary>It scanned the wrong item.</summary>
+          <p>Press Ctrl + Shift + F12 right after the bad scan. It saves a debug report with the screenshot and the
+            candidates to <code>%APPDATA%\ChadScanner\reports\</code> — attach it to a <a
+              href="https://github.com/Jsisas/ChadScanner/issues">GitHub issue</a>.</p>
+        </details>
+        <details>
+          <summary>Do I need TarkovTracker?</summary>
+          <p>No. Progress can live in a local file on your PC. Connect TarkovTracker.org with an API token if you want
+            it synced, or import a TarkovTracker backup.</p>
+        </details>
+        <details>
+          <summary>Where does the data come from?</summary>
+          <p>Items, quests, hideout, traders, barters and crafts from tarkov.dev, refreshed every 10 minutes. Quest
+            events and game mode from EFT's own logs.</p>
+        </details>
+        <details>
+          <summary>SmartScreen / antivirus warning?</summary>
+          <p>The exe isn't code-signed. Click More info → Run anyway. The source is public if you want to check it
+            yourself.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="band cta" id="download">
+      <div class="wrap">
+        <img src="icon.svg" alt="" width="96" height="96">
+        <h2>Stop being a virgin. Download ChadScanner.</h2>
+        <a class="btn btn-primary" id="download-btn-2"
+          href="https://github.com/Jsisas/ChadScanner/releases/latest">Download</a>
+        <p class="meta" id="download-meta-2">Windows 10/11 · x64 · free forever</p>
+        <p class="meta">Only official download: GitHub Releases.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>Prices and quests from tarkov.dev · Progress via TarkovTracker · Not affiliated with Battlestate Games. Escape
+        from Tarkov is a trademark of Battlestate Games.</p>
+      <p><a href="https://github.com/Jsisas/ChadScanner">GitHub</a></p>
+    </div>
+  </footer>
+
+</body>
+
+</html>
