@@ -3,6 +3,7 @@ use crate::card::{self, Rgb};
 use crate::config::{Config, Mode, Paths, Source};
 use crate::data::Store;
 use crate::eftlog::{self, Event, LogState, Tailer};
+use crate::needs;
 use crate::progress::{LocalSource, Notify, ProgressSource, TaskState, TrackerSource};
 use crate::win::{self, hook::ScanRequest, ui};
 use chadvision::engine::Engine;
@@ -44,6 +45,10 @@ pub struct App {
     settings: Mutex<Option<Child>>,
     /// The most recent scan, for Ctrl+Shift+F12 debug reports.
     last_scan: Mutex<Option<LastScan>>,
+    /// The last card shown: item id, where, match score; what the arrow keys act on.
+    last_item: Mutex<Option<(String, (i32, i32), f32)>>,
+    /// The item and objective Arrow Up raised last, which Arrow Down lowers first.
+    last_step: Mutex<Option<(String, String)>>,
     /// Serialises mode switches.
     switch: Mutex<()>,
 }
@@ -72,6 +77,8 @@ impl App {
                 paused: AtomicBool::new(false),
                 settings: Mutex::new(None),
                 last_scan: Mutex::new(None),
+                last_item: Mutex::new(None),
+                last_step: Mutex::new(None),
                 switch: Mutex::new(()),
             }
         });
@@ -132,6 +139,7 @@ impl App {
         }
         *self.cfg.write().unwrap() = new.clone();
         win::hook::set_hotkey(new.hotkey);
+        win::hook::set_progress_keys(new.progress_keys);
         if old.mode != new.mode {
             let w = Arc::downgrade(self);
             *self.store.write().unwrap() = Store::start(new.mode, self.paths.cache(), move || {
@@ -258,8 +266,71 @@ impl App {
         src.refresh_if_stale();
         let c = card::item_card(&cat, item, top, &src.snapshot(), &opts);
         self.show_card(&c, at, Some(seconds).filter(|s| *s > 0.0));
+        *self.last_item.lock().unwrap() = Some((item.id.clone(), at, top));
         let shown = format!("shown: {} ({})", item.short_name, item.id);
         Ok((Some(shot), cands, shown))
+    }
+
+    // ------------------------------------------------------------ quest progress keys
+
+    /// Arrow Up / Down presses, one at a time so quick presses write counts in order.
+    pub fn step_worker(self: Arc<Self>, rx: Receiver<win::hook::Step>) {
+        for step in rx {
+            // Arrow keys are everywhere; only EFT focus is worth acting on.
+            if self.paused.load(Ordering::Relaxed) || !win::eft_in_foreground() {
+                continue;
+            }
+            self.step(if step == win::hook::Step::Up { 1 } else { -1 });
+        }
+    }
+
+    /// Raises (`delta` > 0) or lowers the last scanned item's next quest objective by one and redraws its card.
+    fn step(&self, delta: i32) {
+        let Some((item_id, at, score)) = self.last_item.lock().unwrap().clone() else { return };
+        let Some(cat) = self.store.read().unwrap().get() else { return };
+        let Some(item) = cat.items.get(&item_id) else { return };
+        let src = self.progress();
+        let slots = needs::objective_slots(&cat, &item.id, &src.snapshot());
+        let slot = if delta > 0 {
+            needs::next_fill(&slots, self.cfg.read().unwrap().overfill_fir)
+        } else {
+            let last = self.last_step.lock().unwrap().clone();
+            needs::next_unfill(&slots, last.as_ref().filter(|(i, _)| *i == item.id).map(|(_, o)| o.as_str()))
+        };
+        let Some(slot) = slot else {
+            let why = if delta > 0 { "no quest objective to increase" } else { "no quest objective to decrease" };
+            self.toast(&item.short_name, why, card::GREY);
+            return;
+        };
+        let new = (slot.count as i64 + delta as i64).clamp(0, slot.required as i64) as u32;
+        let write = |id: &str, complete: bool| {
+            src.set_objective(id, complete, new).map_err(|e| {
+                log::warn!("step {id}: {e:#}");
+                self.toast("Progress not saved", &format!("{e:#}"), card::RED);
+            })
+        };
+        if write(&slot.objective_id, new >= slot.required).is_err() {
+            return;
+        }
+        // A paired find is kept level with the give, or the item would still count as needed (up)
+        // or as done (down).
+        if let Some(f) = &slot.find_id {
+            let behind = if delta > 0 { slot.find_count < new } else { slot.find_count > new };
+            if behind && write(f, new >= slot.required).is_err() {
+                return;
+            }
+        }
+        if delta > 0 {
+            *self.last_step.lock().unwrap() = Some((item.id.clone(), slot.objective_id.clone()));
+        }
+        let fir = if slot.fir { " FIR" } else { "" };
+        self.toast(&format!("{} {}/{}{fir}", item.short_name, new, slot.required), &slot.task_name, card::GREEN);
+        let (opts, seconds) = {
+            let c = self.cfg.read().unwrap();
+            (card::CardOptions::from_config(&c), c.tooltip_seconds)
+        };
+        let c = card::item_card(&cat, item, score, &src.snapshot(), &opts);
+        self.show_card(&c, at, Some(seconds).filter(|s| *s > 0.0));
     }
 
     /// Ctrl+Shift+F12: writes the last scan (screenshot, candidates, decision), the screen now

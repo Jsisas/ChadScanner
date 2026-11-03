@@ -322,6 +322,15 @@ impl SettingsApp {
             });
             hint(ui, "Works only while Escape from Tarkov is the active window. The click still reaches the game.");
         });
+        section(ui, "Quest progress keys", |ui| {
+            ui.checkbox(&mut self.cfg.progress_keys, "Arrow Up / Arrow Down change quest progress");
+            hint(
+                ui,
+                "Only while Escape from Tarkov is the active window, for the last scanned item. Up adds one to its next unfilled quest objective, FIR first; Down undoes the last one. The key still reaches the game.",
+            );
+            ui.checkbox(&mut self.cfg.overfill_fir, "When the FIR objectives are full, continue into non-FIR ones");
+            hint(ui, "Off: Arrow Up stops once every FIR objective for the item is full.");
+        });
         section(ui, "Game", |ui| {
             hint(ui, "Run EFT in Borderless mode; the card cannot be drawn over exclusive fullscreen. Pause scanning from the tray icon.");
         });

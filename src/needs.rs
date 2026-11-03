@@ -313,8 +313,9 @@ fn remaining_for_objective(item_id: &str, o: &Objective, p: &Progress, show_non_
     }
 }
 
-/// (total, fir) remaining for a task. A giveItem paired with an equal-count, equal-FIR findItem counts once.
-fn objective_need(item_id: &str, objectives: &[Objective], p: &Progress, show_non_fir: bool) -> (u32, u32) {
+/// Pairs each `giveItem` of the item with an equal-count, equal-FIR `findItem`: (indices of the paired
+/// finds, (give, find) index pairs).
+fn pairs(item_id: &str, objectives: &[Objective]) -> (Vec<usize>, Vec<(usize, usize)>) {
     let wants = |o: &Objective, kind: &str| !o.optional && o.kind == kind && o.items.iter().any(|i| i == item_id);
     let mut paired_find: Vec<usize> = Vec::new();
     let mut pair_of: Vec<(usize, usize)> = Vec::new();
@@ -327,6 +328,12 @@ fn objective_need(item_id: &str, objectives: &[Objective], p: &Progress, show_no
             pair_of.push((gi, fi));
         }
     }
+    (paired_find, pair_of)
+}
+
+/// (total, fir) remaining for a task. A giveItem paired with an equal-count, equal-FIR findItem counts once.
+fn objective_need(item_id: &str, objectives: &[Objective], p: &Progress, show_non_fir: bool) -> (u32, u32) {
+    let (paired_find, pair_of) = pairs(item_id, objectives);
     let (mut fir, mut non_fir) = (0, 0);
     for (i, o) in objectives.iter().enumerate() {
         if paired_find.contains(&i) {
@@ -413,6 +420,100 @@ pub fn quest_needs(cat: &Catalog, item_id: &str, p: &Progress, show_non_fir: boo
         .then(a.name.cmp(&b.name))
     });
     n
+}
+
+/// Gate of a task whose objectives can be progressed right now: `Active` or `Available`.
+fn current_gate(task: &Task, cat: &Catalog, p: &Progress) -> Option<Gate> {
+    if EXCLUDED_TASKS.contains(&task.id.as_str()) {
+        return None;
+    }
+    let (gate, _) = classify_gate(task, cat, p);
+    if gate == Gate::NotApplicable {
+        return None;
+    }
+    if task_shows_progress(task, p) {
+        return Some(Gate::Active);
+    }
+    (gate == Gate::Applicable).then_some(Gate::Available)
+}
+
+/// One quest objective an item can be handed in against, as shown to the arrow-key steps.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Slot {
+    pub task_name: String,
+    pub objective_id: String,
+    pub required: u32,
+    /// Recorded count; a completed objective counts as at least `required`.
+    pub count: u32,
+    /// Still needed, with a paired find folded in (the smaller of the two).
+    pub remaining: u32,
+    pub fir: bool,
+    /// The paired `findItem`, written alongside so the item stops counting as needed.
+    pub find_id: Option<String>,
+    pub find_count: u32,
+}
+
+fn recorded(o: &Objective, p: &Progress) -> u32 {
+    p.objectives.get(&o.id).filter(|e| !e.invalid).map_or(0, |e| if e.complete { o.count.max(e.count) } else { e.count })
+}
+
+/// Open objectives of current tasks that take `item_id`: FIR first, then non-FIR; within each,
+/// active tasks before available ones, then by name.
+pub fn objective_slots(cat: &Catalog, item_id: &str, p: &Progress) -> Vec<Slot> {
+    let mut tasks: Vec<(Gate, &Task)> = cat.tasks.values().filter_map(|t| current_gate(t, cat, p).map(|g| (g, t))).collect();
+    tasks.sort_by(|(ga, a), (gb, b)| {
+        (*ga == Gate::Available).cmp(&(*gb == Gate::Available)).then_with(|| a.name.cmp(&b.name)).then_with(|| a.id.cmp(&b.id))
+    });
+    let mut slots = Vec::new();
+    for (_, task) in tasks {
+        let (paired_find, pair_of) = pairs(item_id, &task.objectives);
+        for (i, o) in task.objectives.iter().enumerate() {
+            let takes = !o.optional
+                && !o.id.is_empty()
+                && matches!(o.kind.as_str(), "giveItem" | "findItem" | "plantItem")
+                && o.items.iter().any(|x| x == item_id);
+            if paired_find.contains(&i) || !takes {
+                continue;
+            }
+            let (mut remaining, fir) = remaining_for_objective(item_id, o, p, true);
+            let find = pair_of.iter().find(|(g, _)| *g == i).map(|&(_, fi)| &task.objectives[fi]);
+            if let Some(f) = find {
+                remaining = remaining.min(remaining_for_objective(item_id, f, p, true).0);
+            }
+            slots.push(Slot {
+                task_name: task.name.clone(),
+                objective_id: o.id.clone(),
+                required: o.count,
+                count: recorded(o, p),
+                remaining,
+                fir,
+                find_id: find.filter(|f| !f.id.is_empty()).map(|f| f.id.clone()),
+                find_count: find.map_or(0, |f| recorded(f, p)),
+            });
+        }
+    }
+    let (mut fir, non_fir): (Vec<Slot>, Vec<Slot>) = slots.into_iter().partition(|s| s.fir);
+    fir.extend(non_fir);
+    fir
+}
+
+/// The objective Arrow Up fills: the first open FIR one; once those are full, the first open non-FIR
+/// one when `overfill_fir` is on. An item with no FIR objective at all always fills.
+pub fn next_fill(slots: &[Slot], overfill_fir: bool) -> Option<&Slot> {
+    if let Some(s) = slots.iter().find(|s| s.fir && s.remaining > 0) {
+        return Some(s);
+    }
+    if !overfill_fir && slots.iter().any(|s| s.fir) {
+        return None;
+    }
+    slots.iter().find(|s| !s.fir && s.remaining > 0)
+}
+
+/// The objective Arrow Down lowers: the one last raised, else the last filled in fill order (so an overfill is undone first).
+pub fn next_unfill<'a>(slots: &'a [Slot], preferred: Option<&str>) -> Option<&'a Slot> {
+    preferred
+        .and_then(|id| slots.iter().find(|s| s.objective_id == id && s.count > 0))
+        .or_else(|| slots.iter().rev().find(|s| s.count > 0))
 }
 
 /// Distinct unfinished tasks anywhere in `task`'s prerequisite chain.
@@ -691,5 +792,51 @@ mod tests {
         let order: Vec<&str> = n.tasks.iter().map(|t| t.task_id.as_str()).collect();
         assert_eq!(order, vec!["now", "near", "far"]);
         assert_eq!(n.tasks[2].missing_prereqs, 2);
+    }
+
+    #[test]
+    fn fill_goes_fir_first_then_overfills() {
+        let c = catalog(vec![task("t", vec![obj("f", "giveItem", 2, true), obj("n", "giveItem", 3, false)])]);
+        let mut p = known();
+        p.objectives.insert("f".into(), ObjectiveProgress { complete: false, count: 2, invalid: false });
+        let slots = objective_slots(&c, ITEM, &p);
+        assert_eq!(next_fill(&slots, true).map(|s| s.objective_id.as_str()), Some("n"));
+        assert_eq!(next_fill(&slots, false), None);
+        // While the FIR objective is open it comes first, whatever the setting.
+        let open = objective_slots(&c, ITEM, &known());
+        assert_eq!(next_fill(&open, false).map(|s| s.objective_id.as_str()), Some("f"));
+    }
+
+    #[test]
+    fn non_fir_only_item_fills_regardless_of_setting() {
+        let c = catalog(vec![task("t", vec![obj("n", "giveItem", 3, false)])]);
+        let slots = objective_slots(&c, ITEM, &known());
+        assert_eq!(next_fill(&slots, false).map(|s| s.objective_id.as_str()), Some("n"));
+    }
+
+    #[test]
+    fn paired_find_is_one_slot_with_find_id() {
+        let c = catalog(vec![task("t", vec![obj("f", "findItem", 3, true), obj("g", "giveItem", 3, true)])]);
+        let slots = objective_slots(&c, ITEM, &known());
+        assert_eq!(slots.len(), 1);
+        assert_eq!((slots[0].objective_id.as_str(), slots[0].find_id.as_deref()), ("g", Some("f")));
+        assert_eq!((slots[0].remaining, slots[0].required, slots[0].fir), (3, 3, true));
+    }
+
+    #[test]
+    fn unfill_prefers_last_increase_else_last_filled() {
+        let c = catalog(vec![task("t", vec![obj("f", "giveItem", 2, true), obj("n", "giveItem", 3, false)])]);
+        let mut p = known();
+        p.objectives.insert("f".into(), ObjectiveProgress { complete: true, count: 2, invalid: false });
+        p.objectives.insert("n".into(), ObjectiveProgress { complete: false, count: 1, invalid: false });
+        let slots = objective_slots(&c, ITEM, &p);
+        let id = |s: Option<&Slot>| s.map(|s| s.objective_id.clone());
+        assert_eq!(id(next_unfill(&slots, None)), Some("n".into()));
+        assert_eq!(id(next_unfill(&slots, Some("f"))), Some("f".into()));
+        // A preferred objective with nothing recorded falls back to the last filled one.
+        p.objectives.remove("n");
+        let slots = objective_slots(&c, ITEM, &p);
+        assert_eq!(id(next_unfill(&slots, Some("n"))), Some("f".into()));
+        assert_eq!(id(next_unfill(&objective_slots(&c, ITEM, &known()), None)), None);
     }
 }

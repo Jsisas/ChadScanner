@@ -92,7 +92,10 @@ fn run() -> anyhow::Result<()> {
     std::thread::Builder::new().name("eft-logs".into()).spawn(move || logs.log_worker())?;
     let watch = app.clone();
     std::thread::Builder::new().name("config".into()).spawn(move || watch.config_worker())?;
-    win::hook::start(scan_tx, cfg.hotkey);
+    let (step_tx, step_rx) = std::sync::mpsc::channel();
+    let steps = app.clone();
+    std::thread::Builder::new().name("steps".into()).spawn(move || steps.step_worker(step_rx))?;
+    win::hook::start(scan_tx, step_tx, cfg.hotkey, cfg.progress_keys);
 
     let actions: Arc<app::App> = app;
     win::ui::run(&ui, ui_rx, &actions)?;

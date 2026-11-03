@@ -48,7 +48,7 @@ Barters 3 · Crafts 5
 | Card | Sections (quests, hideout, barters, crafts), non-FIR needs, rows, Smart / Simple order, Goal, size, close when the mouse leaves, timeout |
 | Progress | Where progress is kept: **On this PC** (local file) or **TarkovTracker.org** (API tokens per game mode, with Test); player level and faction; import a TarkovTracker backup |
 | Hideout | Built station levels (local progress only) |
-| Scanning | Scan button: Shift + Left, Alt + Left, Middle, Mouse 4, Mouse 5 |
+| Scanning | Scan button: Shift + Left, Alt + Left, Middle, Mouse 4, Mouse 5; quest progress keys and FIR overfill |
 | EFT logs | Quest tracking on/off, logs folder |
 | About | Log file, settings folder, debug reports |
 
@@ -62,6 +62,17 @@ Changes are saved and applied immediately. The game mode switches by itself when
 - **TarkovTracker.org** – reads `GET /progress` (every 5 min, and on a scan when older than 60 s; within the
   free 1000 reads/day) and writes completed/failed tasks from the logs. Items you mark on its needed-items
   page lower the counts on the card. Its API cannot change the hideout.
+
+## Quest progress keys
+
+With EFT focused, **Arrow Up** adds one to the last scanned item's next open quest objective and redraws the
+card; **Arrow Down** undoes the last one. FIR objectives fill first; once they are full Arrow Up continues
+into non-FIR ones unless *Scanning → When the FIR objectives are full, continue into non-FIR ones* is off.
+The keys still reach the game. Switch them off under Scanning.
+
+With TarkovTracker as the source a change shows on the card at once and is confirmed with a read 30 s after
+the last write; if the server does not report what was written, the server's value wins and the
+disagreement is logged and toasted.
 
 ## Debug report
 

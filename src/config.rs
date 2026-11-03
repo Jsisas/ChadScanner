@@ -137,6 +137,10 @@ pub struct Config {
     pub goal: Goal,
     pub log_tracking: bool,
     pub logs_override: String,
+    /// Arrow Up / Down change quest progress for the last scanned item while EFT is focused.
+    pub progress_keys: bool,
+    /// Arrow Up continues into non-FIR objectives once the item's FIR ones are full.
+    pub overfill_fir: bool,
 }
 
 impl Default for Config {
@@ -159,6 +163,8 @@ impl Default for Config {
             goal: Goal::None,
             log_tracking: true,
             logs_override: String::new(),
+            overfill_fir: true,
+            progress_keys: true,
         }
     }
 }
