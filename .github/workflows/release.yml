@@ -86,10 +86,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd "$RUNNER_TEMP/dist"
-          v="${GITHUB_REF_NAME#v}"
-          assets=("chadscanner-win-x64.zip#Chadscanner-Win-$v.zip" "manifest.json#manifest.json")
+          assets=(chadscanner-win-x64.zip manifest.json)
           for f in chadscanner-data-*.zip; do
-            [ -e "$f" ] && assets+=("$f#Chadscanner-data-$v.zip")
+            [ -e "$f" ] && assets+=("$f")
           done
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "ChadScanner $GITHUB_REF_NAME" \
             --notes-file notes.md --generate-notes "${assets[@]}"
