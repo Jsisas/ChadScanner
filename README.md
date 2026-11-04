@@ -16,9 +16,9 @@ ChadScanner only takes screenshots around the cursor and reads them with image r
 1. Click the download link above. You get `chadscanner-win-x64.zip`. On the
    [Releases page](https://github.com/Jsisas/ChadScanner/releases/latest) it is the file labelled
    **chadscanner-win-x64.zip**; ignore the other files.
-2. Right-click the zip → **Extract All…** → choose a folder you own, e.g. `C:\ChadScanner`. Not Program Files
-   (updates rewrite this folder), and don't run it from inside the zip.
-3. Double-click `chadscanner.exe`. SmartScreen warns about an unsigned app: **More info → Run anyway**. The
+2. Right-click the zip → **Extract All…** → choose a place you own, e.g. `C:\`; this creates `C:\ChadScanner`.
+   Not Program Files (updates rewrite this folder), and don't run it from inside the zip.
+3. Open the `ChadScanner` folder and double-click `chadscanner.exe`. SmartScreen warns about an unsigned app: **More info → Run anyway**. The
    first start downloads the item data (~180 MB); a toast says when.
 4. In EFT set **Borderless** (Settings → Graphics → Screen mode). Exclusive fullscreen is not supported:
    the card is a normal topmost window and cannot be drawn over an exclusive-fullscreen game.
@@ -150,7 +150,7 @@ layout) on Linux.
 
 Bump `version` in `Cargo.toml`, commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
 `.github/workflows/release.yml` builds with `tools/deploy-wsl.sh` and publishes with
-`tools/package-release.sh` (`chadscanner-win-x64.zip`, a data zip when the data key — `data\key.txt`, hash of catalog + models — changed, `manifest.json`). Do not delete old
+`tools/package-release.sh` (`chadscanner-win-x64.zip` for people, `chadscanner-update-win-x64.zip` for the updater, a data zip when the data key — `data\key.txt`, hash of catalog + models — changed, `manifest.json`). Do not delete old
 releases: a newer manifest may point to an older release's data zip.
 
 ### Icons

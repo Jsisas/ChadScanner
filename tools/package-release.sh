@@ -5,7 +5,7 @@
 #   PUB            folder filled by `tools/deploy-wsl.sh --out PUB`
 #   TAG            release tag, e.g. v0.2.0
 #   REPO           GitHub repo, e.g. Jsisas/ChadScanner
-#   DIST           output folder: app zip, data zip (if changed), manifest.json, notes.md
+#   DIST           output folder: app zip, updater zip, data zip (if changed), manifest.json, notes.md
 #   PREV_MANIFEST  previous release's manifest.json; its data entry is reused when the data key matches
 # Env: CHADVISION_SHA (optional) is recorded in notes.md.
 set -euo pipefail
@@ -29,11 +29,19 @@ BASE="https://github.com/$REPO/releases/download/$TAG"
 KEY=$(cd "$PUB" && find data/refs/catalog.json data/models -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-12)
 printf '%s\n' "$KEY" > "$PUB/data/key.txt"
 
+# APP_ZIP is what people download: files inside a ChadScanner\ folder. UPDATE_ZIP holds the same two
+# files at the zip root; the app's updater (manifest app.url) extracts it into its staging dir.
 APP_ZIP="chadscanner-win-x64.zip"
-rm -f "$DIST/$APP_ZIP"
-(cd "$PUB" && zip -q -X -9 "$DIST/$APP_ZIP" chadscanner.exe onnxruntime.dll)
-APP_JSON=$(jq -n --arg url "$BASE/$APP_ZIP" --arg sha "$(sha256sum "$DIST/$APP_ZIP" | cut -d' ' -f1)" \
-	--argjson size "$(stat -c %s "$DIST/$APP_ZIP")" '{url:$url, sha256:$sha, size:$size}')
+UPDATE_ZIP="chadscanner-update-win-x64.zip"
+rm -f "$DIST/$APP_ZIP" "$DIST/$UPDATE_ZIP"
+(cd "$PUB" && zip -q -X -9 "$DIST/$UPDATE_ZIP" chadscanner.exe onnxruntime.dll)
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+mkdir "$STAGE/ChadScanner"
+cp "$PUB/chadscanner.exe" "$PUB/onnxruntime.dll" "$STAGE/ChadScanner/"
+(cd "$STAGE" && zip -q -X -9 -r "$DIST/$APP_ZIP" ChadScanner)
+APP_JSON=$(jq -n --arg url "$BASE/$UPDATE_ZIP" --arg sha "$(sha256sum "$DIST/$UPDATE_ZIP" | cut -d' ' -f1)" \
+	--argjson size "$(stat -c %s "$DIST/$UPDATE_ZIP")" '{url:$url, sha256:$sha, size:$size}')
 
 if [[ -n "$PREV" && -f "$PREV" && "$(jq -r '.data.key' "$PREV")" == "$KEY" ]]; then
 	echo "data unchanged (key $KEY); reusing the previous release's data zip"
@@ -53,8 +61,8 @@ jq -n --arg version "$VERSION" --argjson app "$APP_JSON" --argjson data "$DATA_J
 	cat <<EOF
 ## ⬇ [Download ChadScanner for Windows](https://github.com/$REPO/releases/download/$TAG/$APP_ZIP)
 
-1. Right-click the downloaded **$APP_ZIP** → **Extract All…** → choose a folder you own, e.g. \`C:\\ChadScanner\`.
-2. Open that folder and double-click **chadscanner.exe**. If Windows SmartScreen warns: **More info → Run anyway**.
+1. Right-click the downloaded **$APP_ZIP** → **Extract All…** → choose a folder you own, e.g. \`C:\\\`, which creates \`C:\\ChadScanner\`.
+2. Open the **ChadScanner** folder and double-click **chadscanner.exe**. If Windows SmartScreen warns: **More info → Run anyway**.
 3. The first start downloads the item data (~180 MB) by itself.
 
 Already installed? Right-click the tray icon → **Update**. Nothing to download here.
