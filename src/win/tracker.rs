@@ -145,6 +145,11 @@ impl Tracker {
         self.eval(&tracker::step_script(id, name, up, targets));
     }
 
+    /// ChadScanner Fill for item `id`; the script sets each of `targets` to its `counts` entry in the site's progress store.
+    pub fn fill(&self, id: &str, name: &str, targets: &[Target], counts: &[u32], fir_left: u32, non_fir_left: u32) {
+        self.eval(&tracker::fill_script(id, name, targets, counts, fir_left, non_fir_left));
+    }
+
     /// Messages the page posted since the last call.
     pub fn drain(&self) -> Vec<String> {
         std::mem::take(&mut *self.messages.borrow_mut())

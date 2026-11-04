@@ -313,8 +313,13 @@ impl App {
     /// The last scanned item and its fill order; None without a scanned item or loaded data.
     fn last_fill_order(&self) -> Option<(crate::data::Item, Vec<needs::Target>)> {
         let (item_id, _, _) = self.last_item.lock().unwrap().clone()?;
+        self.fill_order_for(&item_id)
+    }
+
+    /// Item `item_id` and its fill order; None for an unknown item or without loaded data.
+    fn fill_order_for(&self, item_id: &str) -> Option<(crate::data::Item, Vec<needs::Target>)> {
         let cat = self.store.read().unwrap().get()?;
-        let item = cat.items.get(&item_id)?;
+        let item = cat.items.get(item_id)?;
         let opts = card::CardOptions::from_config(&self.cfg.read().unwrap());
         let targets = card::fill_order(&cat, item, &self.progress().snapshot(), &opts);
         Some((item.clone(), targets))
@@ -670,6 +675,17 @@ impl ui::TrayActions for Arc<App> {
 
     fn tracker_toast(&self, title: &str, body: &str, warn: bool) {
         self.toast(title, body, if warn { card::AMBER } else { card::GREEN });
+    }
+
+    fn tracker_fill(&self, id: &str, fir: u32, non_fir: u32) {
+        let Some((item, targets)) = self.fill_order_for(id) else {
+            self.toast("ChadScanner Fill", "item not in ChadScanner's data", card::AMBER);
+            return;
+        };
+        let overfill = self.cfg.read().unwrap().overfill_fir;
+        let (counts, fir_left, non_fir_left) = needs::distribute(&targets, fir, non_fir, overfill);
+        log::info!("tracker fill: {} fir {fir} non-fir {non_fir}", item.name);
+        self.ui.send(ui::Cmd::TrackerFill { id: item.id, name: item.name, targets, counts, fir_left, non_fir_left });
     }
 
     fn tracker_progress(

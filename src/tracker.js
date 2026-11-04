@@ -93,13 +93,6 @@
     if (!(await open(id, name, null))) return toast(name, 'not in your TarkovTracker needed items', true);
     const store = tarkovStore();
     if (!store || !tarkovState()) return log('tracker: no progress store'), toast(name, 'TarkovTracker progress not loaded', true);
-    // Live read of the site's store, so it reflects each write.
-    const cur = (t, oid) => {
-      const d = tarkovState().d;
-      const e = (t.kind === 'task' ? d.taskObjectives : d.hideoutParts)?.[oid];
-      const c = Number(e?.count) || 0;
-      return e?.complete ? Math.max(c, t.required) : c;
-    };
     let t;
     if (up) {
       t = targets.find((x) => Math.min(cur(x, x.id), x.find ? cur(x, x.find) : Infinity) < x.required);
@@ -126,10 +119,42 @@
     postProgress();
   }
 
+  // ChadScanner Fill: sets every target to its entry of `counts` (the app's from-scratch split of the popup's
+  // collected totals in card order). Paired finds are only raised: a find can legitimately exceed the hand-in.
+  async function fill(id, name, targets, counts, firLeft, nonFirLeft) {
+    // The click came from the open popup; never open one here.
+    if (!modalFor(id)) return toast(name, 'popup closed', true);
+    const store = tarkovStore();
+    if (!store || !tarkovState()) return log('tracker: no progress store'), toast(name, 'TarkovTracker progress not loaded', true);
+    targets.forEach((t, i) => {
+      const n = counts[i];
+      if (cur(t, t.id) !== n) write(store, t, t.id, n);
+      if (t.find && cur(t, t.find) < n) write(store, t, t.find, n);
+    });
+    raised = [];
+    const parts = targets
+      .map((t, i) => [t, counts[i]])
+      .filter(([, n]) => n > 0)
+      .map(([t, n]) => t.label + ' ' + n + '/' + t.required + (t.fir ? ' FIR' : ''));
+    let body = parts.length ? parts.join(' · ') : 'all needs set to 0';
+    if (firLeft) body += ' · ' + firLeft + ' FIR unused';
+    if (nonFirLeft) body += ' · ' + nonFirLeft + ' non-FIR unused';
+    toast(name, body, firLeft + nonFirLeft > 0);
+    log('tracker: fill ' + name);
+    postProgress();
+  }
+
   // Reports the site's own progress store (current game mode) so the card can redraw without waiting for the API.
   const tarkovState = () => {
     const s = document.querySelector('#__nuxt')?.__vue_app__?.config.globalProperties.$pinia?.state.value.swapTarkov;
     return s ? { mode: s.currentGameMode, d: s[s.currentGameMode] || {} } : null;
+  };
+  // Current count of objective / hideout part `oid` (live read of the site's store, so it reflects each write).
+  const cur = (t, oid) => {
+    const d = tarkovState().d;
+    const e = (t.kind === 'task' ? d.taskObjectives : d.hideoutParts)?.[oid];
+    const c = Number(e?.count) || 0;
+    return e?.complete ? Math.max(c, t.required) : c;
   };
   function postProgress() {
     const s = tarkovState();
@@ -151,5 +176,48 @@
       run(() => open(id, name, g));
     },
     step: (id, name, up, targets) => run(() => step(id, name, up, targets)),
+    fill: (id, name, targets, counts, firLeft, nonFirLeft) => run(() => fill(id, name, targets, counts, firLeft, nonFirLeft)),
   };
+
+  // ChadScanner Fill button next to Smart Fill in the item popup. The popup's counters are component refs, so
+  // the click reads the visible totals and the app answers with per-target counts (`fill`).
+  const modalItemId = (m) => {
+    for (const img of m.querySelectorAll('img')) {
+      const hit = /\/([0-9a-f]{24})-[^/]*$/.exec(img.getAttribute('src') || '');
+      if (hit) return hit[1];
+    }
+    return null;
+  };
+  // Collected count of `kind` ('FIR' / 'Non-FIR'): the number between the row's - and + buttons. The site hides
+  // the row when nothing of that kind is needed, so a missing one is 0.
+  const collected = (m, kind) => {
+    const box = m.querySelector('button[aria-label="Increase ' + kind + ' count"]')?.previousElementSibling;
+    if (!box) return 0;
+    const input = box.querySelector('input');
+    return Number(input ? input.value : box.textContent.replace(/\D/g, '')) || 0;
+  };
+  const missingSmartFill = new WeakSet();
+  function ensureButton() {
+    const m = itemModal();
+    if (!m || m.querySelector('[data-chad-fill]')) return;
+    const sf = m.querySelector('[class*="i-mdi:auto-fix"]')?.closest('button');
+    if (!sf) {
+      if (!missingSmartFill.has(m)) (missingSmartFill.add(m), log('tracker: no Smart Fill button'));
+      return;
+    }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = sf.className;
+    b.textContent = 'ChadScanner Fill';
+    b.dataset.chadFill = '1';
+    b.title = "Distribute the collected counts in ChadScanner's card order";
+    b.onclick = () => {
+      const id = modalItemId(m);
+      if (!id) return log('tracker: fill: no item id');
+      post({ fill: { id, fir: collected(m, 'FIR'), nonFir: collected(m, 'Non-FIR') } });
+    };
+    sf.after(b);
+  }
+  const watch = () => new MutationObserver(ensureButton).observe(document.body, { childList: true, subtree: true });
+  document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', watch) : watch();
 })();

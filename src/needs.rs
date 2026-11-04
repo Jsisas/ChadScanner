@@ -532,6 +532,29 @@ pub fn next_unfill<'a>(targets: &'a [Target], preferred: Option<&str>) -> Option
         .or_else(|| targets.iter().rev().find(|t| t.count > 0))
 }
 
+/// Splits the popup's collected totals over `targets` (fill order) from scratch: each target's new count, plus
+/// what is left over. Pass 1: FIR items go to FIR targets and non-FIR items to non-FIR targets, in order.
+/// Pass 2 (only with `overfill_fir`): leftover FIR items go to non-FIR targets still short, in order.
+/// Non-FIR items never fill FIR targets. Returns `(counts, fir_left, non_fir_left)`; `counts[i]` is at most
+/// `targets[i].required`.
+pub fn distribute(targets: &[Target], fir: u32, non_fir: u32, overfill_fir: bool) -> (Vec<u32>, u32, u32) {
+    let (mut fir, mut non_fir) = (fir, non_fir);
+    let mut counts = vec![0u32; targets.len()];
+    for (t, c) in targets.iter().zip(counts.iter_mut()) {
+        let pool = if t.fir { &mut fir } else { &mut non_fir };
+        *c = (*pool).min(t.required);
+        *pool -= *c;
+    }
+    if overfill_fir {
+        for (t, c) in targets.iter().zip(counts.iter_mut()).filter(|(t, _)| !t.fir) {
+            let take = fir.min(t.required - *c);
+            *c += take;
+            fir -= take;
+        }
+    }
+    (counts, fir, non_fir)
+}
+
 /// Distinct unfinished tasks anywhere in `task`'s prerequisite chain.
 fn missing_prereqs(task: &Task, cat: &Catalog, p: &Progress) -> u32 {
     let mut seen = std::collections::HashSet::new();
@@ -883,5 +906,27 @@ mod tests {
         assert_eq!((t[0].count, t[0].remaining, t[0].required, t[0].fir), (3, 0, 3, true));
         assert_eq!((t[0].kind, t[0].label.as_str()), (TargetKind::Hideout, "Lavatory 2"));
         assert!(hideout_targets(&c, "nope", ITEM, &p).is_empty());
+    }
+
+    #[test]
+    fn distribute_keeps_fir_items_for_fir_needs_in_any_order() {
+        let t = |id: &str, required: u32, fir: bool| Target {
+            kind: TargetKind::Hideout,
+            id: id.into(),
+            label: id.into(),
+            required,
+            count: 0,
+            remaining: required,
+            fir,
+            find_id: None,
+            find_count: 0,
+        };
+        // Card order puts the non-FIR need first; FIR items must not be spent on it before the FIR need.
+        let order = [t("sec2", 1, false), t("wc3", 2, true)];
+        assert_eq!(distribute(&order, 2, 1, false), (vec![1, 2], 0, 0));
+        assert_eq!(distribute(&order, 3, 0, true), (vec![1, 2], 0, 0));
+        assert_eq!(distribute(&order, 3, 0, false), (vec![0, 2], 1, 0));
+        assert_eq!(distribute(&order, 0, 5, true), (vec![1, 0], 0, 4));
+        assert_eq!(distribute(&order, 0, 0, true), (vec![0, 0], 0, 0));
     }
 }
