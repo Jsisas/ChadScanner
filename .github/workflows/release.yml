@@ -86,7 +86,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd "$RUNNER_TEMP/dist"
-          assets=(chadscanner-win-x64.zip chadscanner-update-win-x64.zip manifest.json)
+          assets=(chadscanner-win-x64.zip manifest.json)
           for f in chadscanner-data-*.zip; do
             [ -e "$f" ] && assets+=("$f")
           done

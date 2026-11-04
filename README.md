@@ -150,7 +150,7 @@ layout) on Linux.
 
 Bump `version` in `Cargo.toml`, commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
 `.github/workflows/release.yml` builds with `tools/deploy-wsl.sh` and publishes with
-`tools/package-release.sh` (`chadscanner-win-x64.zip` for people, `chadscanner-update-win-x64.zip` for the updater, a data zip when the data key — `data\key.txt`, hash of catalog + models — changed, `manifest.json`). Do not delete old
+`tools/package-release.sh` (`chadscanner-win-x64.zip`, a data zip when the data key — `data\key.txt`, hash of catalog + models — changed, `manifest.json`). Do not delete old
 releases: a newer manifest may point to an older release's data zip.
 
 ### Icons

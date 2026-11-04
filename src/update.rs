@@ -1,6 +1,6 @@
 //! Self-update from GitHub Releases: manifest check, checksummed download, staged swap.
 //!
-//! A release ships an app zip (`chadscanner.exe` + `onnxruntime.dll`) and a data zip (`data/`).
+//! A release ships an app zip (`ChadScanner\chadscanner.exe` + `onnxruntime.dll`) and a data zip (`data/`).
 //! `stage` downloads into `<install>\update\`, `swap_exe` renames the running exe aside and the
 //! new one into place, and `finish` (next start, before the engine loads the DLL and data)
 //! moves the rest. A staging dir without the `ready` marker is an aborted download and is dropped.
@@ -20,6 +20,7 @@ const READY: &str = "ready";
 const DATA_DOWNLOAD: &str = "data.download";
 const EXE: &str = "chadscanner.exe";
 const EXE_OLD: &str = "chadscanner.exe.old";
+const APP_FOLDER: &str = "ChadScanner";
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct Asset {
@@ -103,6 +104,20 @@ fn extract(zip: &Path, dir: &Path) -> anyhow::Result<()> {
     zip::ZipArchive::new(File::open(zip)?)?.extract(dir).with_context(|| format!("extracting {}", zip.display()))
 }
 
+/// The app zip keeps its files in a `ChadScanner\` folder; move them up into `dir`.
+fn hoist_app_folder(dir: &Path) -> anyhow::Result<()> {
+    let folder = dir.join(APP_FOLDER);
+    if !folder.is_dir() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(&folder)? {
+        let entry = entry?;
+        std::fs::rename(entry.path(), dir.join(entry.file_name()))?;
+    }
+    std::fs::remove_dir(&folder)?;
+    Ok(())
+}
+
 /// Covers the old process still unmapping its DLL.
 fn rename_retry(from: &Path, to: &Path) -> std::io::Result<()> {
     let mut tries = 0;
@@ -142,6 +157,7 @@ pub fn stage(agent: &ureq::Agent, m: &Manifest, install: &Path) -> anyhow::Resul
         let zip = dir.join("app.zip");
         download(agent, &m.app, &zip)?;
         extract(&zip, &dir)?;
+        hoist_app_folder(&dir)?;
         std::fs::remove_file(&zip)?;
         if installed_data_key(install).as_deref() != Some(m.data.key.as_str()) {
             let zip = dir.join("data.zip");
@@ -252,6 +268,19 @@ mod tests {
     fn put(path: PathBuf, text: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn hoist_moves_folder_contents_up_and_ignores_flat_zips() {
+        let d = tmp("hoist");
+        put(d.join("ChadScanner/chadscanner.exe"), "exe");
+        put(d.join("ChadScanner/onnxruntime.dll"), "dll");
+        hoist_app_folder(&d).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join(EXE)).unwrap(), "exe");
+        assert!(d.join("onnxruntime.dll").is_file());
+        assert!(!d.join("ChadScanner").exists());
+        hoist_app_folder(&d).unwrap();
+        assert!(d.join(EXE).is_file());
     }
 
     #[test]
