@@ -326,10 +326,10 @@ impl SettingsApp {
             ui.checkbox(&mut self.cfg.progress_keys, "Arrow Up / Arrow Down change quest progress");
             hint(
                 ui,
-                "Only while Escape from Tarkov is the active window, for the last scanned item. Up adds one to its next unfilled quest objective, FIR first; Down undoes the last one. While the TarkovTracker window is open they change the item's FIR / Non-FIR count there instead, and Smart Fill runs 1.5 s after the last press. The key still reaches the game.",
+                "Only while Escape from Tarkov is the active window, for the last scanned item. Up adds one to the first need on its card that still has room (quests, then hideout; each nearest first); Down undoes the last one. With the TarkovTracker window open they change that quest or hideout count on the site; otherwise quest objectives only. The key still reaches the game.",
             );
-            ui.checkbox(&mut self.cfg.overfill_fir, "When the FIR objectives are full, continue into non-FIR ones");
-            hint(ui, "Off: Arrow Up stops once every FIR objective (or the window's FIR count) is full.");
+            ui.checkbox(&mut self.cfg.overfill_fir, "Arrow Up also fills non-FIR needs");
+            hint(ui, "Off: an item with any FIR need only fills its FIR ones.");
         });
         section(ui, "Game", |ui| {
             hint(ui, "Run EFT in Borderless mode; the card cannot be drawn over exclusive fullscreen. Pause scanning from the tray icon.");

@@ -1,6 +1,7 @@
 //! The TarkovTracker window: a plain top-level Win32 window hosting a WebView2 (via wry) on the UI
 //! thread, whose message loop pumps WebView2. The page is driven by `crate::tracker`'s script.
 use crate::config::{write_atomic, Paths};
+use crate::needs::Target;
 use crate::tracker;
 use raw_window_handle::{HandleError, HasWindowHandle, RawWindowHandle, Win32WindowHandle, WindowHandle};
 use serde::{Deserialize, Serialize};
@@ -104,10 +105,6 @@ impl Tracker {
         unsafe { IsWindowVisible(self.hwnd).as_bool() }
     }
 
-    pub fn has_item(&self) -> bool {
-        self.last.is_some()
-    }
-
     /// From the tray: shows the window with the last scanned item open.
     pub fn show(&self) {
         if let Err(e) = self.webview.set_visible(true) {
@@ -143,11 +140,9 @@ impl Tracker {
         self.eval(&tracker::open_script(id, name));
     }
 
-    /// One Arrow key press for the last scanned item; the script runs Smart Fill at once.
-    pub fn step(&mut self, up: bool, overfill: bool) {
-        let Some((id, name)) = &self.last else { return };
-        let script = tracker::step_script(id, name, up, overfill);
-        self.eval(&script);
+    /// One Arrow key press for item `id`; the script writes the chosen count into the site's progress store.
+    pub fn step(&self, id: &str, name: &str, up: bool, targets: &[Target]) {
+        self.eval(&tracker::step_script(id, name, up, targets));
     }
 
     /// Messages the page posted since the last call.

@@ -64,6 +64,8 @@ pub struct QuestNeeds {
 pub struct HideoutNeed {
     pub station: String,
     pub level: u8,
+    /// The `StationLevel.id`.
+    pub level_id: String,
     pub remaining: u32,
     pub fir: bool,
     /// Next level of its station with every prerequisite met.
@@ -422,33 +424,27 @@ pub fn quest_needs(cat: &Catalog, item_id: &str, p: &Progress, show_non_fir: boo
     n
 }
 
-/// Gate of a task whose objectives can be progressed right now: `Active` or `Available`.
-fn current_gate(task: &Task, cat: &Catalog, p: &Progress) -> Option<Gate> {
-    if EXCLUDED_TASKS.contains(&task.id.as_str()) {
-        return None;
-    }
-    let (gate, _) = classify_gate(task, cat, p);
-    if gate == Gate::NotApplicable {
-        return None;
-    }
-    if task_shows_progress(task, p) {
-        return Some(Gate::Active);
-    }
-    (gate == Gate::Applicable).then_some(Gate::Available)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetKind {
+    Task,
+    Hideout,
 }
 
-/// One quest objective an item can be handed in against, as shown to the arrow-key steps.
+/// One count an arrow key changes: a quest objective (with its paired find) or a hideout part.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Slot {
-    pub task_name: String,
-    pub objective_id: String,
+pub struct Target {
+    pub kind: TargetKind,
+    /// Objective id, or hideout part (item requirement) id.
+    pub id: String,
+    /// Task name, or "<station> <level>" (e.g. "Security 2").
+    pub label: String,
     pub required: u32,
-    /// Recorded count; a completed objective counts as at least `required`.
+    /// Recorded count; complete counts as at least `required`.
     pub count: u32,
     /// Still needed, with a paired find folded in (the smaller of the two).
     pub remaining: u32,
     pub fir: bool,
-    /// The paired `findItem`, written alongside so the item stops counting as needed.
+    /// The paired `findItem`, written alongside (quests only).
     pub find_id: Option<String>,
     pub find_count: u32,
 }
@@ -457,63 +453,83 @@ fn recorded(o: &Objective, p: &Progress) -> u32 {
     p.objectives.get(&o.id).filter(|e| !e.invalid).map_or(0, |e| if e.complete { o.count.max(e.count) } else { e.count })
 }
 
-/// Open objectives of current tasks that take `item_id`: FIR first, then non-FIR; within each,
-/// active tasks before available ones, then by name.
-pub fn objective_slots(cat: &Catalog, item_id: &str, p: &Progress) -> Vec<Slot> {
-    let mut tasks: Vec<(Gate, &Task)> = cat.tasks.values().filter_map(|t| current_gate(t, cat, p).map(|g| (g, t))).collect();
-    tasks.sort_by(|(ga, a), (gb, b)| {
-        (*ga == Gate::Available).cmp(&(*gb == Gate::Available)).then_with(|| a.name.cmp(&b.name)).then_with(|| a.id.cmp(&b.id))
-    });
-    let mut slots = Vec::new();
-    for (_, task) in tasks {
-        let (paired_find, pair_of) = pairs(item_id, &task.objectives);
-        for (i, o) in task.objectives.iter().enumerate() {
-            let takes = !o.optional
-                && !o.id.is_empty()
-                && matches!(o.kind.as_str(), "giveItem" | "findItem" | "plantItem")
-                && o.items.iter().any(|x| x == item_id);
-            if paired_find.contains(&i) || !takes {
-                continue;
-            }
-            let (mut remaining, fir) = remaining_for_objective(item_id, o, p, true);
-            let find = pair_of.iter().find(|(g, _)| *g == i).map(|&(_, fi)| &task.objectives[fi]);
-            if let Some(f) = find {
-                remaining = remaining.min(remaining_for_objective(item_id, f, p, true).0);
-            }
-            slots.push(Slot {
-                task_name: task.name.clone(),
-                objective_id: o.id.clone(),
-                required: o.count,
-                count: recorded(o, p),
-                remaining,
-                fir,
-                find_id: find.filter(|f| !f.id.is_empty()).map(|f| f.id.clone()),
-                find_count: find.map_or(0, |f| recorded(f, p)),
-            });
+/// Objectives of `task` that take `item_id`, in task order, full ones included.
+pub fn task_targets(task: &Task, item_id: &str, p: &Progress) -> Vec<Target> {
+    let (paired_find, pair_of) = pairs(item_id, &task.objectives);
+    let mut out = Vec::new();
+    for (i, o) in task.objectives.iter().enumerate() {
+        let takes = !o.optional
+            && !o.id.is_empty()
+            && matches!(o.kind.as_str(), "giveItem" | "findItem" | "plantItem")
+            && o.items.iter().any(|x| x == item_id);
+        if paired_find.contains(&i) || !takes {
+            continue;
         }
+        let (mut remaining, fir) = remaining_for_objective(item_id, o, p, true);
+        let find = pair_of.iter().find(|(g, _)| *g == i).map(|&(_, fi)| &task.objectives[fi]);
+        if let Some(f) = find {
+            remaining = remaining.min(remaining_for_objective(item_id, f, p, true).0);
+        }
+        out.push(Target {
+            kind: TargetKind::Task,
+            id: o.id.clone(),
+            label: task.name.clone(),
+            required: o.count,
+            count: recorded(o, p),
+            remaining,
+            fir,
+            find_id: find.filter(|f| !f.id.is_empty()).map(|f| f.id.clone()),
+            find_count: find.map_or(0, |f| recorded(f, p)),
+        });
     }
-    let (mut fir, non_fir): (Vec<Slot>, Vec<Slot>) = slots.into_iter().partition(|s| s.fir);
-    fir.extend(non_fir);
-    fir
+    out
 }
 
-/// The objective Arrow Up fills: the first open FIR one; once those are full, the first open non-FIR
-/// one when `overfill_fir` is on. An item with no FIR objective at all always fills.
-pub fn next_fill(slots: &[Slot], overfill_fir: bool) -> Option<&Slot> {
-    if let Some(s) = slots.iter().find(|s| s.fir && s.remaining > 0) {
-        return Some(s);
-    }
-    if !overfill_fir && slots.iter().any(|s| s.fir) {
-        return None;
-    }
-    slots.iter().find(|s| !s.fir && s.remaining > 0)
+/// Parts of station level `level_id` that take `item_id`; empty for an unknown level.
+pub fn hideout_targets(cat: &Catalog, level_id: &str, item_id: &str, p: &Progress) -> Vec<Target> {
+    let Some((station, level)) = cat.stations.iter().find_map(|s| s.levels.iter().find(|l| l.id == level_id).map(|l| (s, l))) else {
+        return Vec::new();
+    };
+    level
+        .item_requirements
+        .iter()
+        .filter(|r| r.item == item_id)
+        .map(|req| {
+            let part = p.hideout_parts.get(&req.id);
+            let complete = part.is_some_and(|e| e.complete);
+            let recorded = part.map_or(0, |e| e.count);
+            let done = if complete { req.count } else { recorded };
+            Target {
+                kind: TargetKind::Hideout,
+                id: req.id.clone(),
+                label: format!("{} {}", station.name, level.level),
+                required: req.count,
+                count: if complete { recorded.max(req.count) } else { recorded },
+                remaining: req.count.saturating_sub(done),
+                fir: req.fir,
+                find_id: None,
+                find_count: 0,
+            }
+        })
+        .collect()
 }
 
-/// The objective Arrow Down lowers: the one last raised, else the last filled in fill order (so an overfill is undone first).
-pub fn next_unfill<'a>(slots: &'a [Slot], preferred: Option<&str>) -> Option<&'a Slot> {
+/// Targets Arrow Up may fill, in order. With `overfill_fir` off, an item with any FIR target fills only FIR ones.
+pub fn fillable(targets: &[Target], overfill_fir: bool) -> impl Iterator<Item = &Target> {
+    let fir_only = !overfill_fir && targets.iter().any(|t| t.fir);
+    targets.iter().filter(move |t| t.fir || !fir_only)
+}
+
+/// Arrow Up's target: the first fillable one with room.
+pub fn next_fill(targets: &[Target], overfill_fir: bool) -> Option<&Target> {
+    fillable(targets, overfill_fir).find(|t| t.remaining > 0)
+}
+
+/// Arrow Down's target: `preferred` (the last raised) while it has a count, else the last with a count.
+pub fn next_unfill<'a>(targets: &'a [Target], preferred: Option<&str>) -> Option<&'a Target> {
     preferred
-        .and_then(|id| slots.iter().find(|s| s.objective_id == id && s.count > 0))
-        .or_else(|| slots.iter().rev().find(|s| s.count > 0))
+        .and_then(|id| targets.iter().find(|t| t.id == id && t.count > 0))
+        .or_else(|| targets.iter().rev().find(|t| t.count > 0))
 }
 
 /// Distinct unfinished tasks anywhere in `task`'s prerequisite chain.
@@ -582,6 +598,7 @@ pub fn hideout_needs(cat: &Catalog, item_id: &str, p: &Progress) -> Vec<HideoutN
                 out.push(HideoutNeed {
                     station: station.name.clone(),
                     level: level.level,
+                    level_id: level.id.clone(),
                     remaining,
                     fir,
                     buildable: distance == 0,
@@ -752,6 +769,7 @@ mod tests {
             vec![HideoutNeed {
                 station: "Medstation".into(),
                 level: 2,
+                level_id: "s-2".into(),
                 remaining: 4,
                 fir: true,
                 buildable: true,
@@ -804,48 +822,66 @@ mod tests {
     }
 
     #[test]
-    fn fill_goes_fir_first_then_overfills() {
-        let c = catalog(vec![task("t", vec![obj("f", "giveItem", 2, true), obj("n", "giveItem", 3, false)])]);
+    fn fill_skips_full_targets_and_fir_only_when_overfill_off() {
+        let t = task("t", vec![obj("f", "giveItem", 2, true), obj("n", "giveItem", 3, false)]);
         let mut p = known();
         p.objectives.insert("f".into(), ObjectiveProgress { complete: false, count: 2, invalid: false });
-        let slots = objective_slots(&c, ITEM, &p);
-        assert_eq!(next_fill(&slots, true).map(|s| s.objective_id.as_str()), Some("n"));
-        assert_eq!(next_fill(&slots, false), None);
-        // While the FIR objective is open it comes first, whatever the setting.
-        let open = objective_slots(&c, ITEM, &known());
-        assert_eq!(next_fill(&open, false).map(|s| s.objective_id.as_str()), Some("f"));
+        let targets = task_targets(&t, ITEM, &p);
+        assert_eq!(next_fill(&targets, true).map(|t| t.id.as_str()), Some("n"));
+        assert_eq!(next_fill(&targets, false), None);
+        // Order is the caller's: the open FIR target comes first here only because it is first.
+        let open = task_targets(&t, ITEM, &known());
+        assert_eq!(next_fill(&open, false).map(|t| t.id.as_str()), Some("f"));
     }
 
     #[test]
     fn non_fir_only_item_fills_regardless_of_setting() {
-        let c = catalog(vec![task("t", vec![obj("n", "giveItem", 3, false)])]);
-        let slots = objective_slots(&c, ITEM, &known());
-        assert_eq!(next_fill(&slots, false).map(|s| s.objective_id.as_str()), Some("n"));
+        let t = task("t", vec![obj("n", "giveItem", 3, false)]);
+        let targets = task_targets(&t, ITEM, &known());
+        assert_eq!(next_fill(&targets, false).map(|t| t.id.as_str()), Some("n"));
     }
 
     #[test]
-    fn paired_find_is_one_slot_with_find_id() {
-        let c = catalog(vec![task("t", vec![obj("f", "findItem", 3, true), obj("g", "giveItem", 3, true)])]);
-        let slots = objective_slots(&c, ITEM, &known());
-        assert_eq!(slots.len(), 1);
-        assert_eq!((slots[0].objective_id.as_str(), slots[0].find_id.as_deref()), ("g", Some("f")));
-        assert_eq!((slots[0].remaining, slots[0].required, slots[0].fir), (3, 3, true));
+    fn paired_find_is_one_target_with_find_id() {
+        let t = task("t", vec![obj("f", "findItem", 3, true), obj("g", "giveItem", 3, true)]);
+        let targets = task_targets(&t, ITEM, &known());
+        assert_eq!(targets.len(), 1);
+        assert_eq!((targets[0].id.as_str(), targets[0].find_id.as_deref()), ("g", Some("f")));
+        assert_eq!((targets[0].remaining, targets[0].required, targets[0].fir), (3, 3, true));
     }
 
     #[test]
     fn unfill_prefers_last_increase_else_last_filled() {
-        let c = catalog(vec![task("t", vec![obj("f", "giveItem", 2, true), obj("n", "giveItem", 3, false)])]);
+        let t = task("t", vec![obj("f", "giveItem", 2, true), obj("n", "giveItem", 3, false)]);
         let mut p = known();
         p.objectives.insert("f".into(), ObjectiveProgress { complete: true, count: 2, invalid: false });
         p.objectives.insert("n".into(), ObjectiveProgress { complete: false, count: 1, invalid: false });
-        let slots = objective_slots(&c, ITEM, &p);
-        let id = |s: Option<&Slot>| s.map(|s| s.objective_id.clone());
-        assert_eq!(id(next_unfill(&slots, None)), Some("n".into()));
-        assert_eq!(id(next_unfill(&slots, Some("f"))), Some("f".into()));
-        // A preferred objective with nothing recorded falls back to the last filled one.
+        let targets = task_targets(&t, ITEM, &p);
+        let id = |s: Option<&Target>| s.map(|t| t.id.clone());
+        assert_eq!(id(next_unfill(&targets, None)), Some("n".into()));
+        assert_eq!(id(next_unfill(&targets, Some("f"))), Some("f".into()));
+        // A preferred target with nothing recorded falls back to the last filled one.
         p.objectives.remove("n");
-        let slots = objective_slots(&c, ITEM, &p);
-        assert_eq!(id(next_unfill(&slots, Some("n"))), Some("f".into()));
-        assert_eq!(id(next_unfill(&objective_slots(&c, ITEM, &known()), None)), None);
+        let targets = task_targets(&t, ITEM, &p);
+        assert_eq!(id(next_unfill(&targets, Some("n"))), Some("f".into()));
+        assert_eq!(id(next_unfill(&task_targets(&t, ITEM, &known()), None)), None);
+    }
+
+    #[test]
+    fn hideout_targets_treat_complete_part_as_full_and_unknown_level_as_empty() {
+        let mut c = Catalog::default();
+        let req = HideoutRequirement { id: "r".into(), item: ITEM.into(), count: 3, fir: true };
+        c.stations.push(Station {
+            id: "s".into(),
+            name: "Lavatory".into(),
+            levels: vec![StationLevel { id: "s-2".into(), level: 2, item_requirements: vec![req], ..Default::default() }],
+        });
+        let mut p = known();
+        p.hideout_parts.insert("r".into(), crate::progress::PartProgress { complete: true, count: 0 });
+        let t = hideout_targets(&c, "s-2", ITEM, &p);
+        assert_eq!(t.len(), 1);
+        assert_eq!((t[0].count, t[0].remaining, t[0].required, t[0].fir), (3, 0, 3, true));
+        assert_eq!((t[0].kind, t[0].label.as_str()), (TargetKind::Hideout, "Lavatory 2"));
+        assert!(hideout_targets(&c, "nope", ITEM, &p).is_empty());
     }
 }

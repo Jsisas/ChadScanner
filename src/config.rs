@@ -139,7 +139,7 @@ pub struct Config {
     pub logs_override: String,
     /// Arrow Up / Down change quest progress for the last scanned item while EFT is focused.
     pub progress_keys: bool,
-    /// Arrow Up continues into non-FIR objectives once the item's FIR ones are full.
+    /// Arrow Up may fill non-FIR needs; off = only FIR ones when the item has any.
     pub overfill_fir: bool,
 }
 

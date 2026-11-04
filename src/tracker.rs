@@ -1,5 +1,6 @@
 //! ChadScanner ↔ tarkovtracker.org bridge: the injected page script, the calls into it, and its
 //! messages back.
+use crate::needs::{Target, TargetKind};
 use crate::progress::{ObjectiveProgress, PartProgress};
 use std::collections::HashMap;
 
@@ -15,9 +16,22 @@ pub fn open_script(id: &str, name: &str) -> String {
     format!("window.__chad&&__chad.open({},{})", js(id), js(name))
 }
 
-/// One Arrow key press: `up` raises (FIR first; Non-FIR when FIR is full and `overfill`, or when the item needs no FIR), else undoes.
-pub fn step_script(id: &str, name: &str, up: bool, overfill: bool) -> String {
-    format!("window.__chad&&__chad.step({},{},{up},{overfill})", js(id), js(name))
+/// One Arrow key press: `up` raises the first of `targets` with room, else undoes; `targets` in fill order.
+pub fn step_script(id: &str, name: &str, up: bool, targets: &[Target]) -> String {
+    let targets: Vec<serde_json::Value> = targets
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "kind": if t.kind == TargetKind::Task { "task" } else { "hideout" },
+                "id": t.id,
+                "find": t.find_id,
+                "required": t.required,
+                "fir": t.fir,
+                "label": t.label,
+            })
+        })
+        .collect();
+    format!("window.__chad&&__chad.step({},{},{up},{})", js(id), js(name), serde_json::Value::Array(targets))
 }
 
 #[derive(Debug, PartialEq)]
@@ -93,9 +107,20 @@ mod tests {
 
     #[test]
     fn step_script_quotes_names() {
+        let t = Target {
+            kind: TargetKind::Hideout,
+            id: "p1".into(),
+            label: "Security 2".into(),
+            required: 1,
+            count: 0,
+            remaining: 1,
+            fir: false,
+            find_id: None,
+            find_count: 0,
+        };
         assert_eq!(
-            step_script("a", "O'Neil \"x\"", true, false),
-            r#"window.__chad&&__chad.step("a","O'Neil \"x\"",true,false)"#
+            step_script("a", "O'Neil \"x\"", true, &[t]),
+            r#"window.__chad&&__chad.step("a","O'Neil \"x\"",true,[{"find":null,"fir":false,"id":"p1","kind":"hideout","label":"Security 2","required":1}])"#
         );
     }
 }

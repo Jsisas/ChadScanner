@@ -35,8 +35,8 @@ pub enum Cmd {
     UpdateLabel(String),
     /// Remember this item; open it in the TarkovTracker window when the window is shown.
     TrackerItem { id: String, name: String },
-    /// One Arrow key press for the open item (`overfill`: `Config::overfill_fir`).
-    TrackerStep { up: bool, overfill: bool },
+    /// One Arrow key press for item `id`; `targets` in fill order (Up: already filtered by `fillable`).
+    TrackerStep { up: bool, id: String, name: String, targets: Vec<crate::needs::Target> },
     /// Leaves the message loop (the app then exits).
     Quit,
 }
@@ -309,10 +309,9 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                                 t.item(&id, &name);
                             }
                         }
-                        Cmd::TrackerStep { up, overfill } => match tracker.as_mut() {
+                        Cmd::TrackerStep { up, id, name, targets } => match tracker.as_mut() {
                             None => unavailable(),
-                            Some(t) if !t.has_item() => actions.tracker_toast("Scan an item first", "", true),
-                            Some(t) => t.step(up, overfill),
+                            Some(t) => t.step(&id, &name, up, &targets),
                         },
                         Cmd::UpdateLabel(t) => update.set_text(t),
                         Cmd::Quit => PostQuitMessage(0),

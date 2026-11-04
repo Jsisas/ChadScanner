@@ -133,6 +133,14 @@ impl CardOptions {
     }
 }
 
+/// Where a row's counts live, to turn the card's row order into a fill order.
+enum Source {
+    /// Task id.
+    Task(String),
+    /// Station level id.
+    Hideout(String),
+}
+
 /// One need row with its ordering keys.
 struct Row {
     /// Index into the group headings.
@@ -148,6 +156,7 @@ struct Row {
     tag: String,
     tag_color: Rgb,
     color: Rgb,
+    source: Source,
 }
 
 fn in_goal(t: &needs::TaskNeed, goal: Goal) -> bool {
@@ -158,9 +167,101 @@ fn in_goal(t: &needs::TaskNeed, goal: Goal) -> bool {
     }
 }
 
-pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardOptions) -> Card {
+fn needs_of(cat: &Catalog, item: &Item, p: &Progress, o: &CardOptions) -> (needs::QuestNeeds, Vec<needs::HideoutNeed>) {
     let q = if o.quests { needs::quest_needs(cat, &item.id, p, o.show_non_fir) } else { Default::default() };
     let hideout = if o.hideout { needs::hideout_needs(cat, &item.id, p) } else { Vec::new() };
+    (q, hideout)
+}
+
+/// Need rows in card order: QUESTS, HIDEOUT, then quests outside the goal.
+fn rows(cat: &Catalog, p: &Progress, o: &CardOptions, q: &needs::QuestNeeds, hideout: &[needs::HideoutNeed]) -> Vec<Row> {
+    let plural = |n: u32, one: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {one}s") };
+    let mut rows: Vec<Row> = q
+        .tasks
+        .iter()
+        .map(|t| {
+            let levels_to_go = p.level.map_or(0, |l| t.min_level.saturating_sub(u32::from(l)));
+            let goal = in_goal(t, o.goal);
+            let steps = if t.is_current() { 0 } else { t.missing_prereqs };
+            let status = if t.is_current() {
+                "now".to_owned()
+            } else if steps > 0 {
+                plural(steps, "quest")
+            } else if levels_to_go > 0 {
+                format!("Lv {}", t.min_level)
+            } else {
+                cat.tasks.get(&t.task_id).map_or("locked", |task| needs::other_blocker(task, cat, p)).to_owned()
+            };
+            let fir = if t.fir > 0 { "FIR · " } else { "" };
+            let last = if t.other_done == Some(1.0) { " · last item" } else { "" };
+            Row {
+                group: if goal { 0 } else { 2 },
+                rank: steps,
+                count: t.count,
+                done: t.other_done.unwrap_or(0.0),
+                levels_to_go,
+                unlocks: t.unlocks,
+                name: format!("{}×  {}", t.count, t.name),
+                tag: format!("{fir}{status}{last}"),
+                tag_color: if t.is_current() && goal { GREEN } else { SECONDARY },
+                color: if !goal {
+                    MUTED
+                } else if t.is_current() {
+                    TEXT
+                } else {
+                    SECONDARY
+                },
+                source: Source::Task(t.task_id.clone()),
+            }
+        })
+        .chain(hideout.iter().map(|h| {
+            let status = if h.buildable { "now".to_owned() } else { plural(h.distance, "upgrade") };
+            let last = if h.other_done == Some(1.0) { " · last item" } else { "" };
+            Row {
+                group: 1,
+                rank: h.distance,
+                count: h.remaining,
+                done: h.other_done.unwrap_or(0.0),
+                levels_to_go: 0,
+                unlocks: h.unlocks,
+                name: format!("{}×  {} {}", h.remaining, h.station, h.level),
+                tag: format!("{status}{last}"),
+                tag_color: if h.buildable { GREEN } else { SECONDARY },
+                color: if h.buildable { TEXT } else { SECONDARY },
+                source: Source::Hideout(h.level_id.clone()),
+            }
+        }))
+        .collect();
+    if o.smart {
+        // Fewest steps away first, then fewest levels, then closest to done, then most unlocks.
+        rows.sort_by(|a, b| {
+            a.group
+                .cmp(&b.group)
+                .then(a.rank.cmp(&b.rank))
+                .then(a.levels_to_go.cmp(&b.levels_to_go))
+                .then(b.done.total_cmp(&a.done))
+                .then(b.unlocks.cmp(&a.unlocks))
+        });
+    } else {
+        rows.sort_by(|a, b| a.group.cmp(&b.group).then(b.count.cmp(&a.count)));
+    }
+    rows
+}
+
+/// The counts Arrow Up / Down walk, top card row first (every row, not only the `max_rows` shown).
+pub fn fill_order(cat: &Catalog, item: &Item, p: &Progress, o: &CardOptions) -> Vec<needs::Target> {
+    let (q, hideout) = needs_of(cat, item, p, o);
+    rows(cat, p, o, &q, &hideout)
+        .into_iter()
+        .flat_map(|r| match r.source {
+            Source::Task(id) => cat.tasks.get(&id).map_or_else(Vec::new, |t| needs::task_targets(t, &item.id, p)),
+            Source::Hideout(id) => needs::hideout_targets(cat, &id, &item.id, p),
+        })
+        .collect()
+}
+
+pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardOptions) -> Card {
+    let (q, hideout) = needs_of(cat, item, p, o);
     let quest_total: u32 = q.tasks.iter().map(|t| t.count).sum();
     let hideout_total: u32 = hideout.iter().map(|h| h.remaining).sum();
     let total = quest_total + hideout_total;
@@ -199,74 +300,7 @@ pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardO
     // QUESTS and HIDEOUT; quests outside the goal last. Each row says how far away it is.
     let other = format!("NOT {}", o.goal.label().to_uppercase());
     let groups: [&str; 3] = ["QUESTS", "HIDEOUT", &other];
-    let plural = |n: u32, one: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {one}s") };
-    let mut rows: Vec<Row> = q
-        .tasks
-        .iter()
-        .map(|t| {
-            let levels_to_go = p.level.map_or(0, |l| t.min_level.saturating_sub(u32::from(l)));
-            let goal = in_goal(t, o.goal);
-            let steps = if t.is_current() { 0 } else { t.missing_prereqs };
-            let status = if t.is_current() {
-                "now".to_owned()
-            } else if steps > 0 {
-                plural(steps, "quest")
-            } else if levels_to_go > 0 {
-                format!("Lv {}", t.min_level)
-            } else {
-                cat.tasks.get(&t.task_id).map_or("locked", |task| needs::other_blocker(task, cat, p)).to_owned()
-            };
-            let fir = if t.fir > 0 { "FIR · " } else { "" };
-            let last = if t.other_done == Some(1.0) { " · last item" } else { "" };
-            Row {
-                group: if goal { 0 } else { 2 },
-                rank: steps,
-                count: t.count,
-                done: t.other_done.unwrap_or(0.0),
-                levels_to_go,
-                unlocks: t.unlocks,
-                name: format!("{}×  {}", t.count, t.name),
-                tag: format!("{fir}{status}{last}"),
-                tag_color: if t.is_current() && goal { GREEN } else { SECONDARY },
-                color: if !goal {
-                    MUTED
-                } else if t.is_current() {
-                    TEXT
-                } else {
-                    SECONDARY
-                },
-            }
-        })
-        .chain(hideout.iter().map(|h| {
-            let status = if h.buildable { "now".to_owned() } else { plural(h.distance, "upgrade") };
-            let last = if h.other_done == Some(1.0) { " · last item" } else { "" };
-            Row {
-                group: 1,
-                rank: h.distance,
-                count: h.remaining,
-                done: h.other_done.unwrap_or(0.0),
-                levels_to_go: 0,
-                unlocks: h.unlocks,
-                name: format!("{}×  {} {}", h.remaining, h.station, h.level),
-                tag: format!("{status}{last}"),
-                tag_color: if h.buildable { GREEN } else { SECONDARY },
-                color: if h.buildable { TEXT } else { SECONDARY },
-            }
-        }))
-        .collect();
-    if o.smart {
-        // Fewest steps away first, then fewest levels, then closest to done, then most unlocks.
-        rows.sort_by(|a, b| {
-            a.group
-                .cmp(&b.group)
-                .then(a.rank.cmp(&b.rank))
-                .then(a.levels_to_go.cmp(&b.levels_to_go))
-                .then(b.done.total_cmp(&a.done))
-                .then(b.unlocks.cmp(&a.unlocks))
-        });
-    } else {
-        rows.sort_by(|a, b| a.group.cmp(&b.group).then(b.count.cmp(&a.count)));
-    }
+    let rows = rows(cat, p, o, &q, &hideout);
     let shown = o.max_rows as usize;
     let mut last_group = None;
     for r in rows.iter().take(shown) {
@@ -641,5 +675,50 @@ mod tests {
             show(&item_card(&cat, &item, 0.9, &p, &o))[1..],
             ["QUESTS", "1×  Kappa task | now", "NOT KAPPA", "4×  Side task | FIR · now"]
         );
+    }
+
+    #[test]
+    fn fill_order_puts_buildable_upgrade_before_far_fir_one() {
+        use crate::data::{HideoutRequirement, Station, StationLevel};
+        let mut cat = Catalog::default();
+        let item = Item { id: "i".into(), short_name: "Pliers".into(), width: 1, height: 1, ..Default::default() };
+        let req = |id: &str, count, fir| HideoutRequirement { id: id.into(), item: "i".into(), count, fir };
+        let lvl = |id: &str, level, reqs, needs| StationLevel {
+            id: id.into(),
+            level,
+            item_requirements: reqs,
+            station_requirements: needs,
+            ..Default::default()
+        };
+        // Water Collector comes first in the catalog: the old Smart Fill order would pick it.
+        cat.stations.push(Station {
+            id: "wc".into(),
+            name: "Water Collector".into(),
+            levels: vec![
+                lvl("wc-1", 1, vec![], vec![]),
+                lvl("wc-2", 2, vec![], vec![]),
+                lvl("wc-3", 3, vec![req("wc3", 2, true)], vec![("wc".into(), 2)]),
+            ],
+        });
+        cat.stations.push(Station {
+            id: "sec".into(),
+            name: "Security".into(),
+            levels: vec![lvl("sec-1", 1, vec![], vec![]), lvl("sec-2", 2, vec![req("sec2", 1, false)], vec![])],
+        });
+        let mut p = Progress { level: Some(16), ..Default::default() };
+        p.hideout_modules.insert("sec-1".into());
+        let order = fill_order(&cat, &item, &p, &OPTS);
+        assert_eq!(order.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["sec2", "wc3"]);
+        assert_eq!(needs::next_fill(&order, true).unwrap().id, "sec2");
+        assert_eq!(needs::next_fill(&order, false).unwrap().id, "wc3");
+    }
+
+    #[test]
+    fn fill_order_puts_current_quest_before_future_one() {
+        let (cat, item) = ordering_catalog();
+        let p = Progress { level: Some(16), ..Default::default() };
+        let o = CardOptions { hideout: false, ..OPTS };
+        let ids: Vec<String> = fill_order(&cat, &item, &p, &o).into_iter().map(|t| t.id).collect();
+        assert_eq!(ids, ["os", "ok"]);
     }
 }

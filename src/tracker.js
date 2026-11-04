@@ -29,19 +29,8 @@
     [...document.querySelectorAll(CARD)].find((c) => c.getAttribute('aria-label') === 'View details for ' + name) ||
     null;
   const empty = () => [...document.querySelectorAll('[aria-live=polite]')].some((d) => d.textContent.trim() === 'No items match your search.');
-  const button = (m, dir, kind) => m.querySelector('button[aria-label="' + dir + ' ' + kind + ' count"]');
-  const usable = (b) => !!b && !b.disabled;
-  const counts = (m) =>
-    ['FIR', 'Non-FIR']
-      .map((kind) => {
-        const inc = button(m, 'Increase', kind);
-        const t = inc && inc.parentElement.parentElement.textContent.match(/([\d,.\s]+)\/([\d,.\s]+)/);
-        return t ? kind + ' ' + t[1].replace(/\D/g, '') + '/' + t[2].replace(/\D/g, '') : null;
-      })
-      .filter(Boolean)
-      .join(' · ');
 
-  // Kinds Arrow Up raised in the open modal, newest last; Arrow Down undoes the newest first.
+  // Target ids Arrow Up raised for the open item, newest last; Arrow Down undoes the newest first.
   let raised = [];
 
   // `g`: generation of the scan that asked for this open; once a newer scan bumps `gen` the open stops silently.
@@ -83,43 +72,58 @@
     return ok;
   }
 
-  // Up: FIR first; Non-FIR once FIR is full (only with `overfill`) or when the item needs no FIR.
-  // Down: the newest raised kind, else Non-FIR, else FIR.
-  async function step(id, name, up, overfill) {
-    if (!(await open(id, name, null))) return toast(name, 'not in your TarkovTracker needed items', true);
-    const m = modalFor(id);
-    let kind = null;
-    if (up) {
-      const fir = button(m, 'Increase', 'FIR');
-      if (usable(fir)) kind = 'FIR';
-      else if ((!fir || overfill) && usable(button(m, 'Increase', 'Non-FIR'))) kind = 'Non-FIR';
+  const tarkovStore = () => document.querySelector('#__nuxt')?.__vue_app__?.config.globalProperties.$pinia?._s?.get('swapTarkov') || null;
+
+  // Sets one objective / hideout-part count the way the modal's own +/- rows do. Never marks an objective
+  // complete (the site does that itself, like Smart Fill); hideout parts flip complete at their requirement.
+  function write(store, t, oid, n) {
+    if (t.kind === 'task') {
+      store.setObjectiveCount(oid, n);
+      if (n < t.required && store.isTaskObjectiveComplete(oid)) store.setTaskObjectiveUncomplete(oid);
     } else {
-      kind = [...raised].reverse().concat(['Non-FIR', 'FIR']).find((k) => usable(button(m, 'Decrease', k))) || null;
+      store.setHideoutPartCount(oid, n);
+      const done = n >= t.required;
+      if (done !== store.isHideoutPartComplete(oid)) (done ? store.setHideoutPartComplete(oid) : store.setHideoutPartUncomplete(oid));
     }
-    if (!kind) return toast(name, (up ? 'nothing left to add · ' : 'nothing to remove · ') + counts(m), true);
-    button(m, up ? 'Increase' : 'Decrease', kind).click();
-    if (up) raised.push(kind);
-    else if (raised.lastIndexOf(kind) >= 0) raised.splice(raised.lastIndexOf(kind), 1);
-    await sleep(0); // Vue re-renders on the microtask queue; a macrotask later the Smart Fill button's state is current
-    smartFill();
-    toast(name, counts(m), false);
-    postProgress();
   }
 
-  // Writes the modal's collected totals into the objective/hideout counts. The site disables Smart Fill at 0/0,
-  // so a drop to zero goes through Reset, which zeroes every need of the item (the same distribution).
-  function smartFill() {
-    const m = itemModal();
-    const b = m && m.querySelector('[class*="i-mdi:auto-fix"]')?.closest('button');
-    if (!b) return log('tracker: no item open for Smart Fill');
-    if (b.disabled) {
-      const reset = b.parentElement.querySelector('[class*="i-mdi:refresh"]')?.closest('button');
-      if (!usable(reset)) return;
-      reset.click();
-      return log('tracker: Smart Fill at 0/0 -> Reset');
+  // One Arrow press for the item. `targets` is the card's fill order (Up: already filtered by the app).
+  // Up: +1 on the first target still short. Down: -1 on the newest raised target, else the last one with a count.
+  async function step(id, name, up, targets) {
+    if (!(await open(id, name, null))) return toast(name, 'not in your TarkovTracker needed items', true);
+    const store = tarkovStore();
+    if (!store || !tarkovState()) return log('tracker: no progress store'), toast(name, 'TarkovTracker progress not loaded', true);
+    // Live read of the site's store, so it reflects each write.
+    const cur = (t, oid) => {
+      const d = tarkovState().d;
+      const e = (t.kind === 'task' ? d.taskObjectives : d.hideoutParts)?.[oid];
+      const c = Number(e?.count) || 0;
+      return e?.complete ? Math.max(c, t.required) : c;
+    };
+    let t;
+    if (up) {
+      t = targets.find((x) => Math.min(cur(x, x.id), x.find ? cur(x, x.find) : Infinity) < x.required);
+      if (!t) return toast(name, 'nothing left to add', true);
+      const n = Math.min(cur(t, t.id) + 1, t.required);
+      write(store, t, t.id, n);
+      if (t.find && cur(t, t.find) < n) write(store, t, t.find, n);
+      raised.push(t.id);
+    } else {
+      t =
+        [...raised]
+          .reverse()
+          .map((r) => targets.find((x) => x.id === r))
+          .find((x) => x && cur(x, x.id) > 0) || [...targets].reverse().find((x) => cur(x, x.id) > 0);
+      if (!t) return toast(name, 'nothing to remove', true);
+      const n = cur(t, t.id) - 1;
+      write(store, t, t.id, n);
+      if (t.find && cur(t, t.find) > n) write(store, t, t.find, n);
+      const i = raised.lastIndexOf(t.id);
+      if (i >= 0) raised.splice(i, 1);
     }
-    b.click();
-    log('tracker: Smart Fill ' + counts(m));
+    toast(name, t.label + ' ' + cur(t, t.id) + '/' + t.required + (t.fir ? ' FIR' : ''), false);
+    log('tracker: ' + (up ? '+1 ' : '-1 ') + t.label + ' (' + t.id + ')');
+    postProgress();
   }
 
   // Reports the site's own progress store (current game mode) so the card can redraw without waiting for the API.
@@ -146,6 +150,6 @@
       const g = ++gen;
       run(() => open(id, name, g));
     },
-    step: (id, name, up, overfill) => run(() => step(id, name, up, overfill)),
+    step: (id, name, up, targets) => run(() => step(id, name, up, targets)),
   };
 })();

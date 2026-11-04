@@ -292,56 +292,74 @@ impl App {
             }
             let up = step == win::hook::Step::Up;
             if self.ui.tracker_open() {
-                let overfill = self.cfg.read().unwrap().overfill_fir;
                 log::info!("tracker key: {}", if up { "up" } else { "down" });
-                self.ui.send(ui::Cmd::TrackerStep { up, overfill });
+                let Some((item, all)) = self.last_fill_order() else {
+                    self.toast("Scan an item first", "", card::AMBER);
+                    continue;
+                };
+                let targets = if up {
+                    let overfill = self.cfg.read().unwrap().overfill_fir;
+                    needs::fillable(&all, overfill).cloned().collect()
+                } else {
+                    all
+                };
+                self.ui.send(ui::Cmd::TrackerStep { up, id: item.id, name: item.name, targets });
             } else {
                 self.step(if up { 1 } else { -1 });
             }
         }
     }
 
+    /// The last scanned item and its fill order; None without a scanned item or loaded data.
+    fn last_fill_order(&self) -> Option<(crate::data::Item, Vec<needs::Target>)> {
+        let (item_id, _, _) = self.last_item.lock().unwrap().clone()?;
+        let cat = self.store.read().unwrap().get()?;
+        let item = cat.items.get(&item_id)?;
+        let opts = card::CardOptions::from_config(&self.cfg.read().unwrap());
+        let targets = card::fill_order(&cat, item, &self.progress().snapshot(), &opts);
+        Some((item.clone(), targets))
+    }
+
     /// Raises (`delta` > 0) or lowers the last scanned item's next quest objective by one and redraws its card.
+    /// Quest objectives only: the progress source has no hideout-part write.
     fn step(&self, delta: i32) {
-        let Some((item_id, _, _)) = self.last_item.lock().unwrap().clone() else { return };
-        let Some(cat) = self.store.read().unwrap().get() else { return };
-        let Some(item) = cat.items.get(&item_id) else { return };
+        let Some((item, mut targets)) = self.last_fill_order() else { return };
+        targets.retain(|t| t.kind == needs::TargetKind::Task);
         let src = self.progress();
-        let slots = needs::objective_slots(&cat, &item.id, &src.snapshot());
-        let slot = if delta > 0 {
-            needs::next_fill(&slots, self.cfg.read().unwrap().overfill_fir)
+        let t = if delta > 0 {
+            needs::next_fill(&targets, self.cfg.read().unwrap().overfill_fir)
         } else {
             let last = self.last_step.lock().unwrap().clone();
-            needs::next_unfill(&slots, last.as_ref().filter(|(i, _)| *i == item.id).map(|(_, o)| o.as_str()))
+            needs::next_unfill(&targets, last.as_ref().filter(|(i, _)| *i == item.id).map(|(_, o)| o.as_str()))
         };
-        let Some(slot) = slot else {
+        let Some(t) = t else {
             let why = if delta > 0 { "no quest objective to increase" } else { "no quest objective to decrease" };
             self.toast(&item.short_name, why, card::GREY);
             return;
         };
-        let new = (slot.count as i64 + delta as i64).clamp(0, slot.required as i64) as u32;
+        let new = (t.count as i64 + delta as i64).clamp(0, t.required as i64) as u32;
         let write = |id: &str, complete: bool| {
             src.set_objective(id, complete, new).map_err(|e| {
                 log::warn!("step {id}: {e:#}");
                 self.toast("Progress not saved", &format!("{e:#}"), card::RED);
             })
         };
-        if write(&slot.objective_id, new >= slot.required).is_err() {
+        if write(&t.id, new >= t.required).is_err() {
             return;
         }
         // A paired find is kept level with the give, or the item would still count as needed (up)
         // or as done (down).
-        if let Some(f) = &slot.find_id {
-            let behind = if delta > 0 { slot.find_count < new } else { slot.find_count > new };
-            if behind && write(f, new >= slot.required).is_err() {
+        if let Some(f) = &t.find_id {
+            let behind = if delta > 0 { t.find_count < new } else { t.find_count > new };
+            if behind && write(f, new >= t.required).is_err() {
                 return;
             }
         }
         if delta > 0 {
-            *self.last_step.lock().unwrap() = Some((item.id.clone(), slot.objective_id.clone()));
+            *self.last_step.lock().unwrap() = Some((item.id.clone(), t.id.clone()));
         }
-        let fir = if slot.fir { " FIR" } else { "" };
-        self.toast(&format!("{} {}/{}{fir}", item.short_name, new, slot.required), &slot.task_name, card::GREEN);
+        let fir = if t.fir { " FIR" } else { "" };
+        self.toast(&format!("{} {}/{}{fir}", item.short_name, new, t.required), &t.label, card::GREEN);
         self.redraw_last_card();
     }
 

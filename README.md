@@ -63,7 +63,7 @@ Barters 3 · Crafts 5
 | Card | Sections (quests, hideout, barters, crafts), non-FIR needs, rows, Smart / Simple order, Goal, size, close when the mouse leaves, timeout |
 | Progress | Where progress is kept: **On this PC** (local file) or **TarkovTracker.org** (API tokens per game mode, with Test); player level and faction; import a TarkovTracker backup |
 | Hideout | Built station levels (local progress only) |
-| Scanning | Scan button: Shift + Left, Alt + Left, Middle, Mouse 4, Mouse 5; quest progress keys and FIR overfill |
+| Scanning | Scan button: Shift + Left, Alt + Left, Middle, Mouse 4, Mouse 5; quest progress keys and non-FIR fill |
 | EFT logs | Quest tracking on/off, logs folder |
 | About | Log file, settings folder, debug reports |
 
@@ -80,9 +80,9 @@ Changes are saved and applied immediately. The game mode switches by itself when
 
 ## Quest progress keys
 
-With EFT focused, **Arrow Up** adds one to the last scanned item's next open quest objective and redraws the
-card; **Arrow Down** undoes the last one. FIR objectives fill first; once they are full Arrow Up continues
-into non-FIR ones unless *Scanning → When the FIR objectives are full, continue into non-FIR ones* is off.
+With EFT focused, **Arrow Up** adds one to the first need on the last scanned item's card that still has room
+(quests, then hideout; each nearest first) and redraws the card; **Arrow Down** undoes the last one. With *Scanning → Arrow Up also
+fills non-FIR needs* off, an item with any FIR need only fills its FIR ones.
 The keys still reach the game. Switch them off under Scanning.
 
 With TarkovTracker as the source a change shows on the card at once and is confirmed with a read 30 s after
@@ -97,9 +97,10 @@ needed. It opens at start; closing it hides it, and the tray item **TarkovTracke
 to English.
 
 - A scan opens the item's Needed-Items view in the window.
-- While the window is open and EFT is focused, **Arrow Up / Down** change that item's FIR / Non-FIR count there
-  (FIR first, then non-FIR when *Scanning → continue into non-FIR ones* is on) instead of the quest-progress keys above.
-  **Smart Fill** runs after every press (at 0 it uses **Reset**, so counts drop back to 0 on the site too). With the window closed the keys work as described above.
+- While the window is open and EFT is focused, **Arrow Up / Down** change one quest objective or hideout part count
+  on the site (the first need on the card with room; no Smart Fill) instead of the quest-progress keys above.
+  Counts stay identical on both sides; the site's popup lists rows in its own order, and pressing Smart Fill there moves counts between rows (the card follows).
+  With the window closed the keys work as described above, for quest objectives only.
 - The card redraws after every press from the window's own progress (same game mode only); the next API read confirms it.
 
 ## Troubleshooting
