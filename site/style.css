@@ -764,6 +764,121 @@ details p {
   max-width: 80ch;
 }
 
+/* what is */
+.what-lead {
+  max-width: 72ch;
+  font-size: 19px;
+}
+
+.facts {
+  margin: 40px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 24px 32px;
+}
+
+.facts div {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.facts dt {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.facts dd {
+  margin: 4px 0 0;
+  color: var(--text-2);
+}
+
+/* guide */
+.doc {
+  max-width: 860px;
+  padding-top: 48px;
+  padding-bottom: 96px;
+}
+
+.doc>*+* {
+  margin-top: 16px;
+}
+
+.doc>h2 {
+  margin-top: 72px;
+  font-size: clamp(1.5rem, 3vw, 2rem);
+}
+
+.doc>h3 {
+  margin-top: 32px;
+}
+
+.doc h1 {
+  font-size: clamp(1.6rem, 6.5vw, 3.5rem);
+}
+
+.doc p,
+.doc li,
+.doc td {
+  color: var(--text-2);
+}
+
+.doc ul,
+.doc ol {
+  padding-left: 1.4em;
+  margin-bottom: 0;
+}
+
+.doc li+li {
+  margin-top: 8px;
+}
+
+.doc pre {
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  padding: 16px;
+  overflow-x: auto;
+  font: 500 14px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: var(--text);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.doc table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 16px;
+}
+
+.doc th,
+.doc td {
+  text-align: left;
+  vertical-align: top;
+  padding: 10px 16px 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.doc th {
+  color: var(--text);
+}
+
+.crumbs {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  background: var(--state);
+}
+
 @media (max-width: 860px) {
   .hero {
     padding: 40px 0 56px;

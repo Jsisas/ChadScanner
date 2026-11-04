@@ -2,10 +2,9 @@
 
 # ChadScanner
 
-Item info for **Escape from Tarkov** as a large floating card. Shift + Left-click an item in your stash
-and the card shows how many you still need for quests and hideout upgrades, and what it is worth.
+Free **Escape from Tarkov** item scanner for Windows. Shift + Left-click an item in your stash and a large floating card shows how many you still need for quests and hideout upgrades, and what it is worth on the flea market and to traders. Screenshots + OCR only: no memory reading.
 
-**[⬇ Download ChadScanner for Windows](https://github.com/Jsisas/ChadScanner/releases/latest/download/chadscanner-win-x64.zip)** · Windows 10/11 · free · [website](https://chadscanner.sisas.ee/)
+**[⬇ Download ChadScanner for Windows](https://github.com/Jsisas/ChadScanner/releases/latest/download/chadscanner-win-x64.zip)** · Windows 10/11 · free · [website](https://chadscanner.sisas.ee/) · [guide](https://chadscanner.sisas.ee/guide/)
 
 ## Is it safe?
 

@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How to Use ChadScanner, the Tarkov Item Scanner | Guide</title>
+  <meta name="description"
+    content="Install ChadScanner for Escape from Tarkov, read the item card, set scan buttons, hand in quest items with Arrow Up, sync TarkovTracker and fix common problems.">
+  <meta name="theme-color" content="#0b0d0e">
+  <meta property="og:site_name" content="ChadScanner">
+  <meta property="og:title" content="How to Use ChadScanner, the Tarkov Item Scanner | Guide">
+  <meta property="og:description"
+    content="Install ChadScanner for Escape from Tarkov, read the item card, set scan buttons, hand in quest items with Arrow Up, sync TarkovTracker and fix common problems.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://chadscanner.sisas.ee/guide/">
+  <meta property="og:image" content="https://chadscanner.sisas.ee/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt"
+    content="ChadScanner card next to an Escape from Tarkov item showing quest and hideout needs and prices">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://chadscanner.sisas.ee/guide/">
+  <link rel="icon" href="../icon.svg" type="image/svg+xml">
+  <link rel="icon" href="../icon-32.png" sizes="32x32" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap">
+  <link rel="stylesheet" href="../style.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "TechArticle",
+        "@id": "https://chadscanner.sisas.ee/guide/#article",
+        "headline": "ChadScanner guide",
+        "description": "Install ChadScanner for Escape from Tarkov, read the item card, set scan buttons, hand in quest items with Arrow Up, sync TarkovTracker and fix common problems.",
+        "url": "https://chadscanner.sisas.ee/guide/",
+        "datePublished": "2026-11-04",
+        "dateModified": "2026-11-04",
+        "inLanguage": "en",
+        "author": {"@type": "Person", "name": "Jsisas", "url": "https://github.com/Jsisas"},
+        "image": "https://chadscanner.sisas.ee/og.png",
+        "about": {"@id": "https://chadscanner.sisas.ee/#app"},
+        "isPartOf": {"@id": "https://chadscanner.sisas.ee/#website"}
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {"@type": "ListItem", "position": 1, "name": "ChadScanner", "item": "https://chadscanner.sisas.ee/"},
+          {"@type": "ListItem", "position": 2, "name": "Guide", "item": "https://chadscanner.sisas.ee/guide/"}
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+
+<body>
+
+  <header class="site-header">
+    <div class="wrap bar">
+      <a class="brand" href="../"><img src="../icon.svg" alt="" width="32" height="32"><span>ChadScanner</span></a>
+      <nav aria-label="Primary">
+        <a class="nav-link" href="#install">Install</a>
+        <a class="nav-link" href="#card">The card</a>
+        <a class="nav-link" href="#troubleshooting">Troubleshooting</a>
+        <a class="btn btn-secondary btn-sm" href="https://github.com/Jsisas/ChadScanner">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <article class="wrap doc">
+      <nav class="crumbs" aria-label="Breadcrumb"><a href="../">ChadScanner</a> › Guide</nav>
+      <h1>ChadScanner guide</h1>
+      <p class="lead">ChadScanner is a free Windows app for Escape from Tarkov. Shift + click an item in your stash and
+        a card next to the cursor shows how many you still need for quests and hideout upgrades and what the item
+        sells for. It reads the screen with screenshots and OCR only. This guide covers install, the card, hotkeys,
+        progress sync and fixes.</p>
+      <p class="meta">Last updated <time datetime="2026-11-04">4 November 2026</time> · ChadScanner v0.1.1</p>
+      <ul>
+        <li><a href="#install">How to install ChadScanner</a></li>
+        <li><a href="#card">How to read the item card</a></li>
+        <li><a href="#scan">Scan buttons</a></li>
+        <li><a href="#keys">Hand in quest items with Arrow Up</a></li>
+        <li><a href="#progress">Progress: on this PC or TarkovTracker</a></li>
+        <li><a href="#tracker">Built-in TarkovTracker window</a></li>
+        <li><a href="#settings">Settings</a></li>
+        <li><a href="#updates">Updates</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+        <li><a href="#files">Where ChadScanner keeps its files</a></li>
+        <li><a href="#data">Where the data comes from</a></li>
+      </ul>
+
+      <h2 id="install">How to install ChadScanner</h2>
+      <ol>
+        <li>Download <code>chadscanner-win-x64.zip</code>. On the <a
+            href="https://github.com/Jsisas/ChadScanner/releases/latest">Releases page</a> it is the file labelled
+          <b>chadscanner-win-x64.zip</b>; ignore the other files.
+        </li>
+        <li>Right-click the zip → <b>Extract All…</b> and choose a place you own, e.g. <code>C:\</code>; this creates
+          <code>C:\ChadScanner</code>. Not Program Files (updates rewrite this folder), and don't run it from inside
+          the zip.
+        </li>
+        <li>Open the <code>ChadScanner</code> folder and double-click <code>chadscanner.exe</code>. SmartScreen warns
+          about an unsigned app: <b>More info → Run anyway</b>. The first start downloads the item data (about
+          180 MB); a toast says when it is done.</li>
+        <li>In EFT set <b>Borderless</b> (Settings → Graphics → Screen mode). Exclusive fullscreen is not supported:
+          the card is a normal topmost window and cannot be drawn over an exclusive-fullscreen game.</li>
+        <li>Shift + Left-click an item in your stash. ChadScanner sits in the tray; right-click it for
+          <b>Settings</b>, <b>Pause scanning</b>, <b>Check for updates</b> and <b>Quit</b>.
+        </li>
+      </ol>
+
+      <h2 id="card">How to read the item card</h2>
+      <p>Example card for the item NaCl:</p>
+      <pre>NaCl                                   27× needed
+QUESTS
+4×  Pets Won't Need It                  FIR · now
+3×  First in Line            FIR · trader dialogue
+3×  Thirsty - Secrets                FIR · 4 quests
+HIDEOUT
+6×  Medstation 2                              now
+10× Medstation 3                       3 upgrades
+──────────────────────────────────────────────────
+Flea 94 666 ₽                   Therapist 4 339 ₽
+Barters 3 · Crafts 5</pre>
+      <p>The border colour tells you what to do with the item:</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Border</th>
+              <th>Meaning</th>
+              <th>What to do</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><i class="swatch" style="--state: var(--amber)"></i>Amber</td>
+              <td>Needed now by a quest or hideout upgrade you can do now</td>
+              <td>Keep it</td>
+            </tr>
+            <tr>
+              <td><i class="swatch" style="--state: var(--purple)"></i>Purple</td>
+              <td>Kappa quest</td>
+              <td>Keep it</td>
+            </tr>
+            <tr>
+              <td><i class="swatch" style="--state: var(--later)"></i>Brown</td>
+              <td>Needed later</td>
+              <td>Keep it</td>
+            </tr>
+            <tr>
+              <td><i class="swatch" style="--state: var(--grey)"></i>Grey</td>
+              <td>Not needed, or low value</td>
+              <td>Sell it</td>
+            </tr>
+            <tr>
+              <td><i class="swatch" style="--state: var(--green)"></i>Green</td>
+              <td>Not needed, worth at least 30&thinsp;000&nbsp;₽ per slot</td>
+              <td>Flea it</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ul>
+        <li><b>n× needed</b>: everything still needed, after what you have already handed in or marked.</li>
+        <li><b>Rows</b>: one per quest or hideout level. The right side says how far away it is: <code>now</code>,
+          <code>2 quests</code>, <code>3 upgrades</code>, <code>Lv 30</code>, <code>trader level</code>,
+          <code>trader dialogue</code>, <code>story step</code>. <code>FIR</code> means the item must be found in
+          raid; <code>last item</code> means everything else for that quest or upgrade is already done.
+        </li>
+        <li><b>Smart ordering</b> (default) lists the closest first: now, then fewest quests, upgrades or levels
+          away.</li>
+        <li><b>Goal</b> Kappa or Lightkeeper moves other quests to the bottom, labelled "NOT KAPPA".</li>
+        <li><b>Prices</b>: Flea is the 24-hour average flea market price. The right side is the best trader sell
+          price and that trader.</li>
+      </ul>
+
+      <h2 id="scan">Scan buttons</h2>
+      <p>The default scan button is Shift + Left click. Other options: Alt + Left, Middle, Mouse 4 and Mouse 5.
+        Change it under Settings → Scanning.</p>
+
+      <h2 id="keys">Hand in quest items with Arrow Up</h2>
+      <p>With EFT focused, <b>Arrow Up</b> adds one to the first need on the last scanned item's card that still has
+        room (quests, then hideout; each nearest first) and redraws the card. <b>Arrow Down</b> undoes the last one.
+        With <i>Scanning → Arrow Up also fills non-FIR needs</i> off, an item with any FIR need only fills its FIR
+        ones. The keys still reach the game. Switch them off under Scanning.</p>
+      <p>With TarkovTracker as the source a change shows on the card at once and is confirmed with a read 30 seconds
+        after the last write. If the server does not report what was written, the server's value wins and the
+        disagreement is logged and shown as a toast.</p>
+
+      <h2 id="progress">Progress: on this PC or TarkovTracker</h2>
+      <ul>
+        <li><b>On this PC</b>: <code>%APPDATA%\ChadScanner\progress.json</code> in TarkovTracker backup format, so it
+          can be imported at tarkovtracker.org. Tasks you finish are filled in from EFT's logs, including ones
+          finished while the app was closed. EFT does not log hideout upgrades: set them on the Hideout page.</li>
+        <li><b>TarkovTracker.org</b>: reads your progress every 5 minutes, and on a scan when it is older than 60
+          seconds (within the free 1000 reads per day), and writes completed and failed tasks from the logs. Items
+          you mark on its needed-items page lower the counts on the card. Its API cannot change the hideout.</li>
+      </ul>
+      <p>The game mode switches between PvP and PvE by itself when EFT starts a session.</p>
+
+      <h2 id="tracker">Built-in TarkovTracker window</h2>
+      <p>A second window, <b>ChadScanner · TarkovTracker</b>, embeds tarkovtracker.org (WebView2) so no separate
+        browser is needed. It opens at start; closing it hides it, and the tray item <b>TarkovTracker</b> brings it
+        back. Log in once (Discord, GitHub, Twitch or email; Google may be refused inside WebView2); the login is
+        kept. The site must be set to English.</p>
+      <ul>
+        <li>A scan opens the item's Needed-Items view in the window.</li>
+        <li>While the window is open and EFT is focused, <b>Arrow Up / Down</b> change one quest objective or hideout
+          part count on the site (the first need on the card with room; no Smart Fill) instead of the quest-progress
+          keys above. Counts stay identical on both sides; the site's popup lists rows in its own order, and pressing
+          Smart Fill there moves counts between rows (the card follows). With the window closed the keys work as
+          described above, for quest objectives only.</li>
+        <li>The card redraws after every press from the window's own progress (same game mode only); the next API
+          read confirms it.</li>
+      </ul>
+
+      <h2 id="settings">Settings</h2>
+      <p>Right-click the tray icon → Settings. Changes are saved and applied immediately.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Page</th>
+              <th>What it sets</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Card</td>
+              <td>Sections (quests, hideout, barters, crafts), non-FIR needs, rows, Smart / Simple order, Goal, size,
+                close when the mouse leaves, timeout</td>
+            </tr>
+            <tr>
+              <td>Progress</td>
+              <td>Where progress is kept: On this PC (local file) or TarkovTracker.org (API tokens per game mode, with
+                Test); player level and faction; import a TarkovTracker backup</td>
+            </tr>
+            <tr>
+              <td>Hideout</td>
+              <td>Built station levels (local progress only)</td>
+            </tr>
+            <tr>
+              <td>Scanning</td>
+              <td>Scan button: Shift + Left, Alt + Left, Middle, Mouse 4, Mouse 5; quest progress keys and non-FIR fill
+              </td>
+            </tr>
+            <tr>
+              <td>EFT logs</td>
+              <td>Quest tracking on/off, logs folder</td>
+            </tr>
+            <tr>
+              <td>About</td>
+              <td>Log file, settings folder, debug reports</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="updates">Updates</h2>
+      <p>The app checks GitHub 30 seconds after start and every 6 hours. A newer release shows a toast and the tray
+        item becomes <b>Update to vX.Y.Z</b>; clicking it downloads, swaps the files and restarts. Item data is
+        downloaded again only when it changed. <b>Check for updates</b> in the tray menu checks on demand.</p>
+
+      <h2 id="troubleshooting">Troubleshooting</h2>
+      <ul>
+        <li><b>The card doesn't show up</b> → set EFT to Borderless.</li>
+        <li><b>It scanned the wrong item</b> → press <b>Ctrl + Shift + F12</b> right after a scan that went wrong. It
+          saves <code>%APPDATA%\ChadScanner\reports\report-&lt;time&gt;\</code> with the scan's screenshot, the
+          candidates with scores and why the scan was accepted or rejected (<code>report.json</code>), the screen at
+          that moment and the log tail. Attach it to a <a href="https://github.com/Jsisas/ChadScanner/issues">GitHub
+            issue</a>.</li>
+        <li><b>"Item data download failed"</b> → check the internet connection and restart ChadScanner; details are in
+          <code>%APPDATA%\ChadScanner\log.txt</code>.
+        </li>
+        <li><b>SmartScreen warns about an unsigned app</b> → More info → Run anyway.</li>
+        <li><b>Uninstall</b> → Quit from the tray, then delete the install folder and
+          <code>%APPDATA%\ChadScanner</code>.
+        </li>
+      </ul>
+
+      <h2 id="files">Where ChadScanner keeps its files</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Where</th>
+              <th>What</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>C:\ChadScanner\</code></td>
+              <td><code>chadscanner.exe</code>, <code>onnxruntime.dll</code>, <code>data\</code> (models, index, item
+                images)</td>
+            </tr>
+            <tr>
+              <td><code>%APPDATA%\ChadScanner\</code></td>
+              <td><code>config.json</code>, <code>progress.json</code>, <code>pending.json</code> (TarkovTracker writes
+                waiting for retry), <code>logstate.json</code> (EFT log read position), <code>tracker-window.json</code>
+                (TarkovTracker window position), <code>webview\</code> (its browser profile: keeps the login),
+                <code>cache\</code> (tarkov.dev data), <code>reports\</code>, <code>log.txt</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="data">Where the data comes from</h2>
+      <ul>
+        <li>Items, quests, hideout, traders, barters, crafts: <a href="https://json.tarkov.dev">json.tarkov.dev</a>,
+          refreshed every 10 minutes.</li>
+        <li>Quests only TarkovTracker adds (e.g. "Pay the Fare!"): its <code>tasks-core</code> endpoint, merged in when
+          json.tarkov.dev lacks them.</li>
+        <li>Progress: the <a href="https://tarkovtracker.org">TarkovTracker</a> API or the local file.</li>
+        <li>Quest events and game mode: EFT's own log files.</li>
+      </ul>
+
+      <p><a class="btn btn-primary"
+          href="https://github.com/Jsisas/ChadScanner/releases/latest/download/chadscanner-win-x64.zip">Download
+          ChadScanner</a></p>
+      <p class="meta">Windows 10/11 · x64 · free · Only official download: GitHub Releases.</p>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>Prices and quests from tarkov.dev · Progress via TarkovTracker · Not affiliated with Battlestate Games. Escape
+        from Tarkov is a trademark of Battlestate Games.</p>
+      <p><a href="../">Home</a> · <a href="https://github.com/Jsisas/ChadScanner">GitHub</a></p>
+    </div>
+  </footer>
+
+</body>
+
+</html>

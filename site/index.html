@@ -4,18 +4,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ChadScanner — Shift-click your Tarkov stash like a Chad</title>
+  <title>ChadScanner: Escape from Tarkov Item Scanner &amp; Price Checker</title>
   <meta name="description"
-    content="Free, open-source Windows app for Escape from Tarkov. Shift + click an item and a big card shows how many you still need for quests and hideout, and what it's worth. Screenshot + OCR only.">
+    content="Free Escape from Tarkov item scanner for Windows. Shift + click an item to see quest and hideout needs, flea and trader prices. OCR only, no memory reading.">
   <meta name="theme-color" content="#0b0d0e">
-  <meta property="og:title" content="ChadScanner — Shift-click your Tarkov stash like a Chad">
+  <meta property="og:site_name" content="ChadScanner">
+  <meta property="og:title" content="ChadScanner: Escape from Tarkov Item Scanner &amp; Price Checker">
   <meta property="og:description"
-    content="Free, open-source Windows app for Escape from Tarkov. Shift + click an item and a big card shows how many you still need for quests and hideout, and what it's worth. Screenshot + OCR only.">
+    content="Free Escape from Tarkov item scanner for Windows. Shift + click an item to see quest and hideout needs, flea and trader prices. OCR only, no memory reading.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://jsisas.github.io/ChadScanner/">
-  <meta property="og:image" content="https://jsisas.github.io/ChadScanner/icon-256.png">
-  <meta name="twitter:card" content="summary">
-  <link rel="canonical" href="https://jsisas.github.io/ChadScanner/">
+  <meta property="og:url" content="https://chadscanner.sisas.ee/">
+  <meta property="og:image" content="https://chadscanner.sisas.ee/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt"
+    content="ChadScanner card next to an Escape from Tarkov item showing quest and hideout needs and prices">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://chadscanner.sisas.ee/">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="icon" href="icon-32.png" sizes="32x32" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,6 +29,61 @@
     href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&display=swap">
   <link rel="stylesheet" href="style.css">
   <script src="main.js" defer></script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://chadscanner.sisas.ee/#website",
+        "name": "ChadScanner",
+        "url": "https://chadscanner.sisas.ee/"
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://chadscanner.sisas.ee/#app",
+        "name": "ChadScanner",
+        "description": "Free Escape from Tarkov item scanner for Windows. Shift + click an item to see quest and hideout needs, flea and trader prices. OCR only, no memory reading.",
+        "url": "https://chadscanner.sisas.ee/",
+        "applicationCategory": "GameApplication",
+        "operatingSystem": "Windows 10, Windows 11",
+        "processorRequirements": "x64",
+        "isAccessibleForFree": true,
+        "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+        "downloadUrl": "https://github.com/Jsisas/ChadScanner/releases/latest/download/chadscanner-win-x64.zip",
+        "image": "https://chadscanner.sisas.ee/og.png",
+        "screenshot": "https://chadscanner.sisas.ee/og.png",
+        "author": {"@type": "Person", "name": "Jsisas", "url": "https://github.com/Jsisas"},
+        "sameAs": ["https://github.com/Jsisas/ChadScanner"],
+        "featureList": [
+          "Shift + click item scan using screenshots and OCR",
+          "Quest and hideout needs per item, found-in-raid aware",
+          "Kappa and Lightkeeper goal filter",
+          "Flea market and best trader prices from tarkov.dev",
+          "Arrow Up / Arrow Down quest item hand-in",
+          "TarkovTracker.org sync and built-in TarkovTracker window",
+          "Automatic PvP/PvE switching from EFT logs",
+          "Auto-update from GitHub Releases"
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://chadscanner.sisas.ee/#faq",
+        "mainEntity": [
+          {"@type": "Question", "name": "Will I get banned for using ChadScanner?", "acceptedAnswer": {"@type": "Answer", "text": "No. ChadScanner only takes screenshots and runs OCR on them. No memory reading, no injection, no game-file changes, and OCR is not against Battlestate Games' rules. The full source of ChadScanner and ChadVision is on GitHub for anyone to inspect."}},
+          {"@type": "Question", "name": "Is ChadScanner free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. Free, open source, no account, no ads."}},
+          {"@type": "Question", "name": "Why doesn't the card show up in game?", "acceptedAnswer": {"@type": "Answer", "text": "Set EFT to Borderless. The card is a normal topmost window and can't draw over exclusive fullscreen."}},
+          {"@type": "Question", "name": "What if it scanned the wrong item?", "acceptedAnswer": {"@type": "Answer", "text": "Press Ctrl + Shift + F12 right after the bad scan. It saves a debug report with the screenshot and the candidates to %APPDATA%\\ChadScanner\\reports\\ — attach it to a GitHub issue."}},
+          {"@type": "Question", "name": "Do I need TarkovTracker?", "acceptedAnswer": {"@type": "Answer", "text": "No. Progress can live in a local file on your PC. Connect TarkovTracker.org with an API token if you want it synced, or import a TarkovTracker backup."}},
+          {"@type": "Question", "name": "Does it work in PvE?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. ChadScanner reads EFT's logs and switches between PvP and PvE by itself when a session starts. With TarkovTracker, set an API token for each game mode."}},
+          {"@type": "Question", "name": "Which prices does the card show?", "acceptedAnswer": {"@type": "Answer", "text": "Flea is the 24-hour average flea market price from tarkov.dev. The right side is the best price a trader pays and that trader's name. The border turns green when an item is worth at least 30\u2009000\u00a0₽ per slot."}},
+          {"@type": "Question", "name": "Where does the price and quest data come from?", "acceptedAnswer": {"@type": "Answer", "text": "Items, quests, hideout, traders, barters and crafts from tarkov.dev, refreshed every 10 minutes. Quest events and game mode from EFT's own logs."}},
+          {"@type": "Question", "name": "Why does SmartScreen or antivirus warn about it?", "acceptedAnswer": {"@type": "Answer", "text": "The exe isn't code-signed. Click More info → Run anyway. The source is public if you want to check it yourself."}}
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 
 <body>
@@ -36,6 +96,7 @@
         <a class="nav-link" href="#features">Features</a>
         <a class="nav-link" href="#install">Install</a>
         <a class="nav-link" href="#faq">FAQ</a>
+        <a class="nav-link" href="guide/">Guide</a>
         <a class="btn btn-secondary btn-sm" href="https://github.com/Jsisas/ChadScanner">GitHub</a>
       </nav>
     </div>
@@ -45,9 +106,10 @@
     <section class="hero" id="top">
       <div class="wrap hero-grid">
         <div class="hero-copy">
-          <h1>Shift-click your stash like a Chad.</h1>
-          <p class="lead">Shift + click any item and ChadScanner slams a big card next to it: how many you still need
-            for quests and hideout, and what it's worth. No wiki. No alt-tab. No spreadsheet. Just answers.</p>
+          <h1>The Tarkov item scanner for Chads.</h1>
+          <p class="lead">Shift + click any item in your Escape from Tarkov stash and ChadScanner slams a big card next
+            to it: how many you still need for quests and hideout, and what it's worth. No wiki. No alt-tab. No
+            spreadsheet. Just answers.</p>
           <div class="cta-row">
             <a class="btn btn-primary" id="download-btn"
               href="https://github.com/Jsisas/ChadScanner/releases/latest/download/chadscanner-win-x64.zip">Download</a>
@@ -89,6 +151,43 @@
             <div class="c-recipes">Barters 3 · Crafts 5</div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section class="section" id="what">
+      <div class="wrap">
+        <h2>What is ChadScanner?</h2>
+        <p class="sub what-lead">ChadScanner is a free Windows app for Escape from Tarkov (EFT) that shows item info
+          as a large floating card. Shift + click an item in your stash and the card lists how many of it you still
+          need for quests and hideout upgrades, whether a Kappa quest wants it, and what it sells for on the flea
+          market and to traders.</p>
+        <dl class="facts">
+          <div>
+            <dt>Platform</dt>
+            <dd>Windows 10/11 x64. EFT in Borderless mode.</dd>
+          </div>
+          <div>
+            <dt>Price</dt>
+            <dd>Free. No account, no ads.</dd>
+          </div>
+          <div>
+            <dt>How it reads items</dt>
+            <dd>Screenshot around the cursor, image recognition and OCR (ChadVision). No memory reading, no injection.
+            </dd>
+          </div>
+          <div>
+            <dt>Data</dt>
+            <dd>Items, quests, hideout, prices, barters and crafts from tarkov.dev, refreshed every 10 minutes.</dd>
+          </div>
+          <div>
+            <dt>Progress</dt>
+            <dd>A local file on your PC or synced with TarkovTracker.org.</dd>
+          </div>
+          <div>
+            <dt>Game modes</dt>
+            <dd>PvP and PvE, switched automatically from EFT's logs.</dd>
+          </div>
+        </dl>
       </div>
     </section>
 
@@ -277,7 +376,8 @@
           </li>
           <li>
             <h3>Run it</h3>
-            <p>Open the <code>ChadScanner</code> folder and start <code>chadscanner.exe</code>. SmartScreen whines about an unsigned app: More info → Run anyway.
+            <p>Open the <code>ChadScanner</code> folder and start <code>chadscanner.exe</code>. SmartScreen whines about
+              an unsigned app: More info → Run anyway.
               First start downloads the item data (~180 MB).</p>
           </li>
           <li>
@@ -290,29 +390,31 @@
               loot.</p>
           </li>
         </ol>
+        <p class="footnote"><a href="guide/">Full guide: card colours, hotkeys, TarkovTracker sync and troubleshooting
+            →</a></p>
       </div>
     </section>
 
     <section class="section" id="faq">
       <div class="wrap faq-wrap">
-        <h2>Questions from the virgins</h2>
+        <h2>FAQ: questions from the virgins</h2>
         <details>
-          <summary>Will I get banned?</summary>
+          <summary>Will I get banned for using ChadScanner?</summary>
           <p>No. ChadScanner only takes screenshots and runs OCR on them. No memory reading, no injection, no game-file
             changes, and OCR is not against Battlestate Games' rules. The full source of <a
               href="https://github.com/Jsisas/ChadScanner">ChadScanner</a> and <a
               href="https://github.com/Jsisas/ChadVision">ChadVision</a> is on GitHub for anyone to inspect.</p>
         </details>
         <details>
-          <summary>Is it free?</summary>
+          <summary>Is ChadScanner free?</summary>
           <p>Yes. Free, open source, no account, no ads.</p>
         </details>
         <details>
-          <summary>The card doesn't show up in game.</summary>
+          <summary>Why doesn't the card show up in game?</summary>
           <p>Set EFT to Borderless. The card is a normal topmost window and can't draw over exclusive fullscreen.</p>
         </details>
         <details>
-          <summary>It scanned the wrong item.</summary>
+          <summary>What if it scanned the wrong item?</summary>
           <p>Press Ctrl + Shift + F12 right after the bad scan. It saves a debug report with the screenshot and the
             candidates to <code>%APPDATA%\ChadScanner\reports\</code> — attach it to a <a
               href="https://github.com/Jsisas/ChadScanner/issues">GitHub issue</a>.</p>
@@ -323,12 +425,23 @@
             it synced, or import a TarkovTracker backup.</p>
         </details>
         <details>
-          <summary>Where does the data come from?</summary>
+          <summary>Does it work in PvE?</summary>
+          <p>Yes. ChadScanner reads EFT's logs and switches between PvP and PvE by itself when a session starts. With
+            TarkovTracker, set an API token for each game mode.</p>
+        </details>
+        <details>
+          <summary>Which prices does the card show?</summary>
+          <p>Flea is the 24-hour average flea market price from tarkov.dev. The right side is the best price a trader
+            pays and that trader's name. The border turns green when an item is worth at least 30&thinsp;000&nbsp;₽ per
+            slot.</p>
+        </details>
+        <details>
+          <summary>Where does the price and quest data come from?</summary>
           <p>Items, quests, hideout, traders, barters and crafts from tarkov.dev, refreshed every 10 minutes. Quest
             events and game mode from EFT's own logs.</p>
         </details>
         <details>
-          <summary>SmartScreen / antivirus warning?</summary>
+          <summary>Why does SmartScreen or antivirus warn about it?</summary>
           <p>The exe isn't code-signed. Click More info → Run anyway. The source is public if you want to check it
             yourself.</p>
         </details>
@@ -351,7 +464,7 @@
     <div class="wrap">
       <p>Prices and quests from tarkov.dev · Progress via TarkovTracker · Not affiliated with Battlestate Games. Escape
         from Tarkov is a trademark of Battlestate Games.</p>
-      <p><a href="https://github.com/Jsisas/ChadScanner">GitHub</a></p>
+      <p><a href="guide/">Guide</a> · <a href="https://github.com/Jsisas/ChadScanner">GitHub</a></p>
     </div>
   </footer>
 

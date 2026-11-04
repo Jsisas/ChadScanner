@@ -1,0 +1,24 @@
+# ChadScanner
+
+> ChadScanner is a free, Windows 10/11 x64 item scanner for Escape from Tarkov (EFT). Shift + click an item in the stash and a large floating card shows how many the player still needs for quests and hideout upgrades (found-in-raid aware, Kappa/Lightkeeper aware) and its flea market and best trader price. It works from screenshots and OCR only: no game memory reading, no injection, no game-file changes.
+
+- Download: one zip, `chadscanner-win-x64.zip`, only from GitHub Releases. Extract (e.g. to `C:\`), run `chadscanner.exe`, set EFT to Borderless.
+- Data: items, quests, hideout, prices, barters and crafts from tarkov.dev, refreshed every 10 minutes.
+- Progress: local file (TarkovTracker backup format) or TarkovTracker.org sync via API token per game mode; built-in TarkovTracker window.
+- PvP and PvE: switched automatically from EFT's log files.
+- Hotkeys: Arrow Up hands one item in to the next open objective, Arrow Down undoes; scan button configurable (Shift + Left, Alt + Left, Middle, Mouse 4, Mouse 5).
+- Updates itself from GitHub Releases (checked at start and every 6 hours).
+- Not affiliated with Battlestate Games.
+
+## Docs
+
+- [Guide](https://chadscanner.sisas.ee/guide/): install, reading the card, hotkeys, TarkovTracker sync, troubleshooting, file locations
+- [README](https://raw.githubusercontent.com/Jsisas/ChadScanner/master/README.md): full reference including build instructions
+
+## Links
+
+- [Website](https://chadscanner.sisas.ee/)
+- [Latest release](https://github.com/Jsisas/ChadScanner/releases/latest)
+- [Source code](https://github.com/Jsisas/ChadScanner)
+- [ChadVision recognition engine](https://github.com/Jsisas/ChadVision)
+- [Issues](https://github.com/Jsisas/ChadScanner/issues)
