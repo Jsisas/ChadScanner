@@ -9,7 +9,7 @@ const SCRIPT: &str = include_str!("tracker.js");
 const ICON_SVG: &str = include_str!("../assets/icon.svg");
 
 /// Injected into every main-frame document (defines `window.__chad` on tarkovtracker.org only), with the exe icon
-/// filled in for the ChadScanner Fill button.
+/// filled in for the Chad Fill button.
 pub fn script() -> String {
     SCRIPT.replacen("CHAD_ICON_SVG", &js(ICON_SVG), 1)
 }
@@ -45,7 +45,7 @@ pub fn step_script(id: &str, name: &str, up: bool, targets: &[Target]) -> String
     format!("window.__chad&&__chad.step({},{},{up},{})", js(id), js(name), targets_json(targets))
 }
 
-/// ChadScanner Fill: sets each of `targets` to the matching `counts` entry; `fir_left`/`non_fir_left` are the
+/// Chad Fill: sets each of `targets` to the matching `counts` entry; `fir_left`/`non_fir_left` are the
 /// collected items no target took.
 pub fn fill_script(id: &str, name: &str, targets: &[Target], counts: &[u32], fir_left: u32, non_fir_left: u32) -> String {
     format!(
@@ -61,7 +61,7 @@ pub fn fill_script(id: &str, name: &str, targets: &[Target], counts: &[u32], fir
 pub enum Message {
     Toast { title: String, body: String, warn: bool },
     Log(String),
-    /// ChadScanner Fill clicked in the item popup for item `id`: what the popup showed.
+    /// Chad Fill clicked in the item popup for item `id`: what the popup showed.
     Fill { id: String, popup: Popup },
     /// The site's own progress for its current game mode (`pvp`/`pve`/`seasonal`), by objective and hideout-part id.
     Progress { mode: String, objectives: HashMap<String, ObjectiveProgress>, parts: HashMap<String, PartProgress> },

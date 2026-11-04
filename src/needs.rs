@@ -542,7 +542,7 @@ pub struct PopupRow {
     pub count: u32,
 }
 
-/// What the item popup showed when ChadScanner Fill was clicked.
+/// What the item popup showed when Chad Fill was clicked.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Popup {
     /// The Collected FIR / Non-FIR totals.
@@ -552,7 +552,7 @@ pub struct Popup {
     pub rows: Vec<PopupRow>,
 }
 
-/// `p` as if none of `item_id` were handed in. ChadScanner Fill picks and orders its targets from this, so its own
+/// `p` as if none of `item_id` were handed in. Chad Fill picks and orders its targets from this, so its own
 /// writes never change what the next fill does.
 pub fn without_item(cat: &Catalog, item_id: &str, p: &Progress) -> Progress {
     let mut out = p.clone();

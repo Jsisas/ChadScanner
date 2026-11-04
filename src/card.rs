@@ -260,7 +260,7 @@ pub fn fill_order(cat: &Catalog, item: &Item, p: &Progress, o: &CardOptions) -> 
         .collect()
 }
 
-/// What ChadScanner Fill splits: `targets` in fill order and the popup's Collected totals they share.
+/// What Chad Fill splits: `targets` in fill order and the popup's Collected totals they share.
 #[derive(Debug, PartialEq)]
 pub struct FillScope {
     pub targets: Vec<needs::Target>,
@@ -268,7 +268,7 @@ pub struct FillScope {
     pub non_fir: u32,
 }
 
-/// The targets ChadScanner Fill writes, in card order with none of `item` handed in, and the share of the popup's
+/// The targets Chad Fill writes, in card order with none of `item` handed in, and the share of the popup's
 /// Collected totals they get: rows the popup lists but ChadScanner does not fill keep their counts, so those come off
 /// the pools. Card rows the popup does not list are never written.
 pub fn fill_scope(cat: &Catalog, item: &Item, p: &Progress, o: &CardOptions, popup: &needs::Popup) -> FillScope {

@@ -119,7 +119,7 @@
     postProgress();
   }
 
-  // ChadScanner Fill: sets every target to its entry of `counts`, the app's from-scratch split of the popup's
+  // Chad Fill: sets every target to its entry of `counts`, the app's from-scratch split of the popup's
   // Collected totals over the popup's rows in card order. Paired finds are only raised: a find can legitimately
   // exceed the hand-in.
   async function fill(id, name, targets, counts, firLeft, nonFirLeft) {
@@ -180,7 +180,7 @@
     fill: (id, name, targets, counts, firLeft, nonFirLeft) => run(() => fill(id, name, targets, counts, firLeft, nonFirLeft)),
   };
 
-  // ChadScanner Fill button next to Smart Fill in the item popup. The popup's counters are component refs, so
+  // Chad Fill button next to Smart Fill in the item popup. The popup's counters are component refs, so
   // the click reads the visible totals and the app answers with per-target counts (`fill`).
   const modalItemId = (m) => {
     for (const img of m.querySelectorAll('img')) {
@@ -233,7 +233,7 @@
     icon.src = ICON;
     icon.alt = '';
     icon.className = 'mr-1 h-4 w-4 shrink-0';
-    b.append(icon, 'ChadScanner Fill');
+    b.append(icon, 'Chad Fill');
     b.dataset.chadFill = '1';
     b.title = "Distribute the collected counts in ChadScanner's card order";
     b.onclick = () => {

@@ -37,7 +37,7 @@ pub enum Cmd {
     TrackerItem { id: String, name: String },
     /// One Arrow key press for item `id`; `targets` in fill order (Up: already filtered by `fillable`).
     TrackerStep { up: bool, id: String, name: String, targets: Vec<crate::needs::Target> },
-    /// ChadScanner Fill result: set each of `targets` to the matching `counts` entry.
+    /// Chad Fill result: set each of `targets` to the matching `counts` entry.
     TrackerFill {
         id: String,
         name: String,
@@ -89,7 +89,7 @@ pub trait TrayActions {
     fn update(&self);
     /// A toast about the TarkovTracker window (`warn`: amber, else green).
     fn tracker_toast(&self, title: &str, body: &str, warn: bool);
-    /// ChadScanner Fill clicked in the TarkovTracker popup for item `id`: what the popup showed.
+    /// Chad Fill clicked in the TarkovTracker popup for item `id`: what the popup showed.
     fn tracker_fill(&self, id: &str, popup: crate::needs::Popup);
     /// The TarkovTracker window reported its own progress for `mode` (`pvp`/`pve`/`seasonal`).
     fn tracker_progress(

@@ -680,12 +680,12 @@ impl ui::TrayActions for Arc<App> {
     fn tracker_fill(&self, id: &str, popup: needs::Popup) {
         if popup.rows.is_empty() {
             log::warn!("tracker fill: no need rows read from the popup for {id}");
-            self.toast("ChadScanner Fill", "could not read the popup's needs", card::AMBER);
+            self.toast("Chad Fill", "could not read the popup's needs", card::AMBER);
             return;
         }
         let cat = self.store.read().unwrap().get();
         let Some((cat, item)) = cat.as_ref().and_then(|c| c.items.get(id).map(|i| (c, i))) else {
-            self.toast("ChadScanner Fill", "item not in ChadScanner's data", card::AMBER);
+            self.toast("Chad Fill", "item not in ChadScanner's data", card::AMBER);
             return;
         };
         let (opts, overfill) = {
@@ -699,7 +699,7 @@ impl ui::TrayActions for Arc<App> {
                 popup.rows.iter().map(|r| &r.group).collect::<Vec<_>>(),
                 item.name
             );
-            self.toast("ChadScanner Fill", "none of the popup's needs are on ChadScanner's card", card::AMBER);
+            self.toast("Chad Fill", "none of the popup's needs are on ChadScanner's card", card::AMBER);
             return;
         }
         let (counts, fir_left, non_fir_left) = needs::distribute(&scope.targets, scope.fir, scope.non_fir, overfill);
