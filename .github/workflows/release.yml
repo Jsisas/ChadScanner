@@ -86,9 +86,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd "$RUNNER_TEMP/dist"
-          assets=("chadscanner-win-x64.zip#⬇ ChadScanner for Windows (download this)" "manifest.json#Update info (used by the app)")
+          assets=("chadscanner-win-x64.zip#ChadScanner for Windows" "manifest.json#Update info, used by the app")
           for f in chadscanner-data-*.zip; do
-            [ -e "$f" ] && assets+=("$f#Item data (the app downloads it by itself)")
+            [ -e "$f" ] && assets+=("$f#Item data, downloaded by the app itself")
           done
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "ChadScanner $GITHUB_REF_NAME" \
             --notes-file notes.md --generate-notes "${assets[@]}"

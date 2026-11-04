@@ -15,7 +15,7 @@ ChadScanner only takes screenshots around the cursor and reads them with image r
 
 1. Click the download link above. You get `chadscanner-win-x64.zip`. On the
    [Releases page](https://github.com/Jsisas/ChadScanner/releases/latest) it is the file labelled
-   **ChadScanner for Windows (download this)**; ignore the other files.
+   **ChadScanner for Windows**; ignore the other files.
 2. Right-click the zip → **Extract All…** → choose a folder you own, e.g. `C:\ChadScanner`. Not Program Files
    (updates rewrite this folder), and don't run it from inside the zip.
 3. Double-click `chadscanner.exe`. SmartScreen warns about an unsigned app: **More info → Run anyway**. The
