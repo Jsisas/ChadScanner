@@ -1,9 +1,9 @@
 var RELEASE_API = 'https://api.github.com/repos/Jsisas/ChadScanner/releases/latest';
-var ASSET_RE = /^chadscanner-.+-win-x64\.zip$/;
+var ASSET_NAME = 'chadscanner-win-x64.zip';
 
 function applyRelease(rel) {
   if (!rel || !rel.tag_name || !Array.isArray(rel.assets)) return false;
-  var asset = rel.assets.find(function (a) { return ASSET_RE.test(a.name); });
+  var asset = rel.assets.find(function (a) { return a.name === ASSET_NAME; });
   if (!asset) return false;
   var mb = (asset.size / 1048576).toFixed(1);
   ['download-btn', 'download-btn-2'].forEach(function (id) {

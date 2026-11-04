@@ -5,8 +5,31 @@
 Item info for **Escape from Tarkov** as a large floating card. Shift + Left-click an item in your stash
 and the card shows how many you still need for quests and hideout upgrades, and what it is worth.
 
-Native Windows app written in Rust. Successor of the C# RatScanner fork; recognition is done by
-[ChadVision](https://github.com/Jsisas/ChadVision) (icon embedding + OCR of EFT's hover tooltip).
+**[⬇ Download ChadScanner for Windows](https://github.com/Jsisas/ChadScanner/releases/latest/download/chadscanner-win-x64.zip)** · Windows 10/11 · free · [website](https://chadscanner.sisas.ee/)
+
+## Is it safe?
+
+ChadScanner only takes screenshots around the cursor and reads them with image recognition and OCR. It never reads or writes game memory, injects anything or touches game files; the source of this repo and [ChadVision](https://github.com/Jsisas/ChadVision) is public.
+
+## Install
+
+1. Click the download link above. You get `chadscanner-win-x64.zip`. On the
+   [Releases page](https://github.com/Jsisas/ChadScanner/releases/latest) it is the file labelled
+   **ChadScanner for Windows (download this)**; ignore the other files.
+2. Right-click the zip → **Extract All…** → choose a folder you own, e.g. `C:\ChadScanner`. Not Program Files
+   (updates rewrite this folder), and don't run it from inside the zip.
+3. Double-click `chadscanner.exe`. SmartScreen warns about an unsigned app: **More info → Run anyway**. The
+   first start downloads the item data (~180 MB); a toast says when.
+4. In EFT set **Borderless** (Settings → Graphics → Screen mode). Exclusive fullscreen is not supported:
+   the card is a normal topmost window and cannot be drawn over an exclusive-fullscreen game.
+5. Shift + Left-click an item in your stash. ChadScanner sits in the tray; right-click it for **Settings**,
+   **Pause scanning**, **Check for updates** and **Quit**.
+
+## Updates
+
+The app checks GitHub 30 s after start and every 6 h. A newer release shows a toast and the tray item
+becomes **Update to vX.Y.Z**; clicking it downloads, swaps the files and restarts. Item data is downloaded
+again only when it changed. **Check for updates** checks on demand.
 
 ## What the card shows
 
@@ -32,24 +55,6 @@ Barters 3 · Crafts 5
   green: valuable (≥ 30 000 ₽ per slot).
 - **Smart ordering** (default) lists the closest first: now, then fewest quests/upgrades/levels away.
 - **Goal** Kappa / Lightkeeper moves other quests to the bottom ("NOT KAPPA").
-
-## Install
-
-1. Download `chadscanner-<version>-win-x64.zip` from
-   [Releases](https://github.com/Jsisas/ChadScanner/releases/latest) and extract it to a folder you own,
-   e.g. `C:\ChadScanner`. Not Program Files: updates rewrite this folder.
-2. Run `chadscanner.exe`. SmartScreen warns about an unsigned app: **More info → Run anyway**. The first
-   start downloads the item data (~180 MB) into `data\`.
-3. Set EFT to **Borderless** (Settings → Graphics → Screen mode). Exclusive fullscreen is not supported:
-   the card is a normal topmost window and cannot be drawn over an exclusive-fullscreen game.
-4. ChadScanner sits in the tray; right-click for **Settings**, **Pause scanning**, **Check for updates**
-   and **Quit**.
-
-## Updates
-
-The app checks GitHub 30 s after start and every 6 h. A newer release shows a toast and the tray item
-becomes **Update to vX.Y.Z**; clicking it downloads, swaps the files and restarts. The item data is
-downloaded again only when its key (`data\key.txt`) changed. **Check for updates** checks on demand.
 
 ## Settings
 
@@ -97,13 +102,35 @@ to English.
   **Smart Fill** runs after every press (at 0 it uses **Reset**, so counts drop back to 0 on the site too). With the window closed the keys work as described above.
 - The card redraws after every press from the window's own progress (same game mode only); the next API read confirms it.
 
-## Debug report
+## Troubleshooting
 
-Press **Ctrl + Shift + F12** right after a scan that went wrong. It saves
-`%APPDATA%\ChadScanner\reports\report-<time>\` with the scan's screenshot, the candidates with scores and
-why the scan was accepted or rejected (`report.json`), the screen at that moment and the log tail.
+- **The card doesn't show up** → set EFT to Borderless.
+- **It scanned the wrong item** → press **Ctrl + Shift + F12** right after a scan that went wrong. It saves
+  `%APPDATA%\ChadScanner\reports\report-<time>\` with the scan's screenshot, the candidates with scores and
+  why the scan was accepted or rejected (`report.json`), the screen at that moment and the log tail. Attach it to a [GitHub issue](https://github.com/Jsisas/ChadScanner/issues).
+- **"Item data download failed"** → check the internet connection and restart ChadScanner; details are in `%APPDATA%\ChadScanner\log.txt`.
+- **Uninstall** → Quit from the tray, then delete the install folder and `%APPDATA%\ChadScanner`.
 
-## Build (WSL / Linux)
+## Files
+
+| Where | What |
+|---|---|
+| `C:\ChadScanner\` | `chadscanner.exe`, `onnxruntime.dll`, `data\` (models, index, item images) |
+| `%APPDATA%\ChadScanner\` | `config.json`, `progress.json`, `pending.json` (TarkovTracker writes waiting for retry), `logstate.json` (EFT log read position), `tracker-window.json` (TarkovTracker window position), `webview\` (its browser profile: keeps the login), `cache\` (tarkov.dev data), `reports\`, `log.txt` |
+
+## Data sources
+
+- Items, quests, hideout, traders, barters, crafts: [json.tarkov.dev](https://json.tarkov.dev), refreshed every 10 min.
+- Quests only TarkovTracker adds (e.g. "Pay the Fare!"): its `tasks-core` endpoint, merged in when json.tarkov.dev lacks them.
+- Progress: [TarkovTracker](https://tarkovtracker.org) API or the local file.
+- Quest events and game mode: EFT's own log files.
+
+## For developers
+
+Native Windows app written in Rust. Successor of the C# RatScanner fork; recognition is done by
+[ChadVision](https://github.com/Jsisas/ChadVision) (icon embedding + OCR of EFT's hover tooltip).
+
+### Build (WSL / Linux)
 
 ```
 git clone https://github.com/Jsisas/ChadVision.git          # next to this repo
@@ -116,31 +143,21 @@ Needs rustup, `lld` (`lld-link`), curl and unzip; the script installs the Window
 `cargo-xwin`, prepares ChadVision's models and index, and copies the ONNX Runtime DLL. Quit the app first
 (the exe is locked while it runs).
 
+`cargo test` runs the platform-independent parts (data parsing, needs, progress store, log parsing, card
+layout) on Linux.
+
 ### Release
 
 Bump `version` in `Cargo.toml`, commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
 `.github/workflows/release.yml` builds with `tools/deploy-wsl.sh` and publishes with
-`tools/package-release.sh` (app zip, data zip when the data changed, `manifest.json`). Do not delete old
+`tools/package-release.sh` (`chadscanner-win-x64.zip`, a data zip when the data key — `data\key.txt`, hash of catalog + models — changed, `manifest.json`). Do not delete old
 releases: a newer manifest may point to an older release's data zip.
 
-`cargo test` runs the platform-independent parts (data parsing, needs, progress store, log parsing, card
-layout) on Linux.
-
-## Files
-
-| Where | What |
-|---|---|
-| `C:\ChadScanner\` | `chadscanner.exe`, `onnxruntime.dll`, `data\` (models, index, item images, `key.txt`) |
-| `%APPDATA%\ChadScanner\` | `config.json`, `progress.json`, `pending.json` (TarkovTracker writes waiting for retry), `logstate.json` (EFT log read position), `tracker-window.json` (TarkovTracker window position), `webview\` (its browser profile: keeps the login), `cache\` (tarkov.dev data), `reports\`, `log.txt` |
-
-## Data sources
-
-- Items, quests, hideout, traders, barters, crafts: [json.tarkov.dev](https://json.tarkov.dev), refreshed every 10 min.
-- Quests only TarkovTracker adds (e.g. "Pay the Fare!"): its `tasks-core` endpoint, merged in when json.tarkov.dev lacks them.
-- Progress: [TarkovTracker](https://tarkovtracker.org) API or the local file.
-- Quest events and game mode: EFT's own log files.
-
-## Icons
+### Icons
 
 `assets/icon.svg` is the exe, tray and Settings window icon. The PNGs next to it are rendered from the
 SVG; `build.rs` embeds `icon-*.png` in the exe.
+
+### Website
+
+`site/` is the landing page at https://chadscanner.sisas.ee/, deployed by `.github/workflows/pages.yml` via `tools/build-site.sh`; `node --test site/main.test.js` tests it.

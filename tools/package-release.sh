@@ -29,7 +29,7 @@ BASE="https://github.com/$REPO/releases/download/$TAG"
 KEY=$(cd "$PUB" && find data/refs/catalog.json data/models -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-12)
 printf '%s\n' "$KEY" > "$PUB/data/key.txt"
 
-APP_ZIP="chadscanner-$VERSION-win-x64.zip"
+APP_ZIP="chadscanner-win-x64.zip"
 rm -f "$DIST/$APP_ZIP"
 (cd "$PUB" && zip -q -X -9 "$DIST/$APP_ZIP" chadscanner.exe onnxruntime.dll)
 APP_JSON=$(jq -n --arg url "$BASE/$APP_ZIP" --arg sha "$(sha256sum "$DIST/$APP_ZIP" | cut -d' ' -f1)" \
@@ -50,7 +50,17 @@ jq -n --arg version "$VERSION" --argjson app "$APP_JSON" --argjson data "$DATA_J
 	'{version:$version, app:$app, data:$data}' > "$DIST/manifest.json"
 
 {
-	printf 'Download **%s**, extract it to a folder you own (e.g. C:\\ChadScanner) and run chadscanner.exe. The app downloads its item data (chadscanner-data-*.zip) by itself.\n' "$APP_ZIP"
+	cat <<EOF
+## ⬇ [Download ChadScanner for Windows](https://github.com/$REPO/releases/download/$TAG/$APP_ZIP)
+
+1. Right-click the downloaded **$APP_ZIP** → **Extract All…** → choose a folder you own, e.g. \`C:\\ChadScanner\`.
+2. Open that folder and double-click **chadscanner.exe**. If Windows SmartScreen warns: **More info → Run anyway**.
+3. The first start downloads the item data (~180 MB) by itself.
+
+Already installed? Right-click the tray icon → **Update**. Nothing to download here.
+
+The other files below are used by the app's updater; you do not need them.
+EOF
 	if [[ -n "${CHADVISION_SHA:-}" ]]; then printf '\nChadVision: %s\n' "$CHADVISION_SHA"; fi
 } > "$DIST/notes.md"
 

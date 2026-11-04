@@ -21,7 +21,8 @@ test('picks_app_zip_over_data_zip', function () {
     tag_name: 'v0.1.0',
     assets: [
       { name: 'chadscanner-data-ab12.zip', size: 1, browser_download_url: 'https://x/data' },
-      { name: 'chadscanner-0.1.0-win-x64.zip', size: 9437184, browser_download_url: 'https://x/app' },
+      { name: 'chadscanner-0.1.0-win-x64.zip', size: 1, browser_download_url: 'https://x/old' },
+      { name: 'chadscanner-win-x64.zip', size: 9437184, browser_download_url: 'https://x/app' },
     ],
   });
   assert.strictEqual(ok, true);
@@ -32,7 +33,7 @@ test('sets_both_buttons_and_meta', function () {
   reset();
   applyRelease({
     tag_name: 'v0.1.0',
-    assets: [{ name: 'chadscanner-0.1.0-win-x64.zip', size: 9437184, browser_download_url: 'u' }],
+    assets: [{ name: 'chadscanner-win-x64.zip', size: 9437184, browser_download_url: 'u' }],
   });
   ['download-btn', 'download-btn-2'].forEach(function (id) {
     assert.strictEqual(els[id].textContent, 'Download v0.1.0');
@@ -54,7 +55,7 @@ test('match_is_case_sensitive', function () {
   reset();
   const ok = applyRelease({
     tag_name: 'v1',
-    assets: [{ name: 'ChadScanner-0.1.0-win-x64.zip', size: 1, browser_download_url: 'u' }],
+    assets: [{ name: 'ChadScanner-win-x64.zip', size: 1, browser_download_url: 'u' }],
   });
   assert.strictEqual(ok, false);
 });
