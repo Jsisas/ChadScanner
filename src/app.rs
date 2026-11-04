@@ -677,15 +677,50 @@ impl ui::TrayActions for Arc<App> {
         self.toast(title, body, if warn { card::AMBER } else { card::GREEN });
     }
 
-    fn tracker_fill(&self, id: &str, fir: u32, non_fir: u32) {
-        let Some((item, targets)) = self.fill_order_for(id) else {
+    fn tracker_fill(&self, id: &str, popup: needs::Popup) {
+        if popup.rows.is_empty() {
+            log::warn!("tracker fill: no need rows read from the popup for {id}");
+            self.toast("ChadScanner Fill", "could not read the popup's needs", card::AMBER);
+            return;
+        }
+        let cat = self.store.read().unwrap().get();
+        let Some((cat, item)) = cat.as_ref().and_then(|c| c.items.get(id).map(|i| (c, i))) else {
             self.toast("ChadScanner Fill", "item not in ChadScanner's data", card::AMBER);
             return;
         };
-        let overfill = self.cfg.read().unwrap().overfill_fir;
-        let (counts, fir_left, non_fir_left) = needs::distribute(&targets, fir, non_fir, overfill);
-        log::info!("tracker fill: {} fir {fir} non-fir {non_fir}", item.name);
-        self.ui.send(ui::Cmd::TrackerFill { id: item.id, name: item.name, targets, counts, fir_left, non_fir_left });
+        let (opts, overfill) = {
+            let c = self.cfg.read().unwrap();
+            (card::CardOptions::from_config(&c), c.overfill_fir)
+        };
+        let scope = card::fill_scope(cat, item, &self.progress().snapshot(), &opts, &popup);
+        if scope.targets.is_empty() {
+            log::warn!(
+                "tracker fill: none of the popup's rows {:?} are on the card for {}",
+                popup.rows.iter().map(|r| &r.group).collect::<Vec<_>>(),
+                item.name
+            );
+            self.toast("ChadScanner Fill", "none of the popup's needs are on ChadScanner's card", card::AMBER);
+            return;
+        }
+        let (counts, fir_left, non_fir_left) = needs::distribute(&scope.targets, scope.fir, scope.non_fir, overfill);
+        log::info!(
+            "tracker fill: {} popup fir {} non-fir {} in {} row(s); splitting fir {} non-fir {} over {} target(s)",
+            item.name,
+            popup.fir,
+            popup.non_fir,
+            popup.rows.len(),
+            scope.fir,
+            scope.non_fir,
+            scope.targets.len()
+        );
+        self.ui.send(ui::Cmd::TrackerFill {
+            id: item.id.clone(),
+            name: item.name.clone(),
+            targets: scope.targets,
+            counts,
+            fir_left,
+            non_fir_left,
+        });
     }
 
     fn tracker_progress(

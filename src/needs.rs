@@ -532,6 +532,43 @@ pub fn next_unfill<'a>(targets: &'a [Target], preferred: Option<&str>) -> Option
         .or_else(|| targets.iter().rev().find(|t| t.count > 0))
 }
 
+/// One need row of TarkovTracker's item popup: its task (`Task`) or station level (`Hideout`) id, whether it
+/// needs found-in-raid items, and the count it shows (at most its requirement, as the Collected totals count it).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PopupRow {
+    pub kind: TargetKind,
+    pub group: String,
+    pub fir: bool,
+    pub count: u32,
+}
+
+/// What the item popup showed when ChadScanner Fill was clicked.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Popup {
+    /// The Collected FIR / Non-FIR totals.
+    pub fir: u32,
+    pub non_fir: u32,
+    /// Need rows in the popup's order.
+    pub rows: Vec<PopupRow>,
+}
+
+/// `p` as if none of `item_id` were handed in. ChadScanner Fill picks and orders its targets from this, so its own
+/// writes never change what the next fill does.
+pub fn without_item(cat: &Catalog, item_id: &str, p: &Progress) -> Progress {
+    let mut out = p.clone();
+    for o in cat.tasks.values().flat_map(|t| &t.objectives) {
+        if matches!(o.kind.as_str(), "giveItem" | "findItem" | "plantItem") && o.items.iter().any(|x| x == item_id) {
+            out.objectives.remove(&o.id);
+        }
+    }
+    for r in cat.stations.iter().flat_map(|s| &s.levels).flat_map(|l| &l.item_requirements) {
+        if r.item == item_id {
+            out.hideout_parts.remove(&r.id);
+        }
+    }
+    out
+}
+
 /// Splits the popup's collected totals over `targets` (fill order) from scratch: each target's new count, plus
 /// what is left over. Pass 1: FIR items go to FIR targets and non-FIR items to non-FIR targets, in order.
 /// Pass 2 (only with `overfill_fir`): leftover FIR items go to non-FIR targets still short, in order.

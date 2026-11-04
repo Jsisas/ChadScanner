@@ -260,6 +260,49 @@ pub fn fill_order(cat: &Catalog, item: &Item, p: &Progress, o: &CardOptions) -> 
         .collect()
 }
 
+/// What ChadScanner Fill splits: `targets` in fill order and the popup's Collected totals they share.
+#[derive(Debug, PartialEq)]
+pub struct FillScope {
+    pub targets: Vec<needs::Target>,
+    pub fir: u32,
+    pub non_fir: u32,
+}
+
+/// The targets ChadScanner Fill writes, in card order with none of `item` handed in, and the share of the popup's
+/// Collected totals they get: rows the popup lists but ChadScanner does not fill keep their counts, so those come off
+/// the pools. Card rows the popup does not list are never written.
+pub fn fill_scope(cat: &Catalog, item: &Item, p: &Progress, o: &CardOptions, popup: &needs::Popup) -> FillScope {
+    let fresh = needs::without_item(cat, &item.id, p);
+    let (q, hideout) = needs_of(cat, item, &fresh, o);
+    let mut targets = Vec::new();
+    let mut covered: Vec<(needs::TargetKind, String)> = Vec::new();
+    for row in rows(cat, &fresh, o, &q, &hideout) {
+        let (kind, id, found) = match row.source {
+            Source::Task(id) => {
+                let Some(task) = cat.tasks.get(&id) else { continue };
+                let mut found = needs::task_targets(task, &item.id, &fresh);
+                // The popup has no row for a find, and a paired find already rides along with its give.
+                found.retain(|t| task.objectives.iter().any(|ob| ob.id == t.id && ob.kind != "findItem"));
+                (needs::TargetKind::Task, id, found)
+            }
+            Source::Hideout(id) => {
+                let found = needs::hideout_targets(cat, &id, &item.id, &fresh);
+                (needs::TargetKind::Hideout, id, found)
+            }
+        };
+        if !found.is_empty() && popup.rows.iter().any(|r| r.kind == kind && r.group == id) {
+            targets.extend(found);
+            covered.push((kind, id));
+        }
+    }
+    let (mut fir, mut non_fir) = (popup.fir, popup.non_fir);
+    for r in popup.rows.iter().filter(|r| !covered.iter().any(|(k, g)| *k == r.kind && *g == r.group)) {
+        let pool = if r.fir { &mut fir } else { &mut non_fir };
+        *pool = pool.saturating_sub(r.count);
+    }
+    FillScope { targets, fir, non_fir }
+}
+
 pub fn item_card(cat: &Catalog, item: &Item, score: f32, p: &Progress, o: &CardOptions) -> Card {
     let (q, hideout) = needs_of(cat, item, p, o);
     let quest_total: u32 = q.tasks.iter().map(|t| t.count).sum();
@@ -720,5 +763,51 @@ mod tests {
         let o = CardOptions { hideout: false, ..OPTS };
         let ids: Vec<String> = fill_order(&cat, &item, &p, &o).into_iter().map(|t| t.id).collect();
         assert_eq!(ids, ["os", "ok"]);
+    }
+
+    fn part(complete: bool, count: u32) -> crate::progress::PartProgress {
+        crate::progress::PartProgress { complete, count }
+    }
+
+    fn popup_row(kind: needs::TargetKind, group: &str, fir: bool, count: u32) -> needs::PopupRow {
+        needs::PopupRow { kind, group: group.into(), fir, count }
+    }
+
+    #[test]
+    fn fill_scope_keeps_full_needs_so_a_second_fill_changes_nothing() {
+        use needs::TargetKind::Hideout;
+        let (cat, item) = ordering_catalog();
+        let o = CardOptions { quests: false, ..OPTS };
+        let mut p = Progress { level: Some(16), ..Default::default() };
+        p.hideout_parts.insert("b1".into(), part(true, 2));
+        p.hideout_parts.insert("a2".into(), part(false, 3));
+        let popup = needs::Popup {
+            fir: 0,
+            non_fir: 5,
+            rows: vec![popup_row(Hideout, "b-1", false, 2), popup_row(Hideout, "b-2", false, 0), popup_row(Hideout, "a-2", false, 3)],
+        };
+        let s = fill_scope(&cat, &item, &p, &o, &popup);
+        assert_eq!(s.targets.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["b1", "b2", "a2"]);
+        assert_eq!(needs::distribute(&s.targets, s.fir, s.non_fir, true), (vec![2, 3, 0], 0, 0));
+
+        p.hideout_parts.insert("b2".into(), part(false, 3));
+        p.hideout_parts.insert("a2".into(), part(false, 0));
+        assert_eq!(fill_scope(&cat, &item, &p, &o, &popup), s);
+    }
+
+    #[test]
+    fn fill_scope_leaves_unlisted_needs_and_takes_off_rows_it_cannot_fill() {
+        use needs::TargetKind::{Hideout, Task};
+        let (cat, item) = ordering_catalog();
+        let o = CardOptions { quests: false, ..OPTS };
+        let p = Progress { level: Some(16), ..Default::default() };
+        let popup = needs::Popup {
+            fir: 4,
+            non_fir: 3,
+            rows: vec![popup_row(Task, "s", true, 4), popup_row(Hideout, "b-1", false, 0)],
+        };
+        let s = fill_scope(&cat, &item, &p, &o, &popup);
+        assert_eq!(s.targets.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["b1"]);
+        assert_eq!((s.fir, s.non_fir), (0, 3));
     }
 }

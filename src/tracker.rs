@@ -1,12 +1,18 @@
 //! ChadScanner ↔ tarkovtracker.org bridge: the injected page script, the calls into it, and its
 //! messages back.
-use crate::needs::{Target, TargetKind};
+use crate::needs::{Popup, PopupRow, Target, TargetKind};
 use crate::progress::{ObjectiveProgress, PartProgress};
 use std::collections::HashMap;
 
 pub const START_URL: &str = "https://tarkovtracker.org/needed-items";
-/// Injected into every main-frame document; defines `window.__chad` on tarkovtracker.org only.
-pub const SCRIPT: &str = include_str!("tracker.js");
+const SCRIPT: &str = include_str!("tracker.js");
+const ICON_SVG: &str = include_str!("../assets/icon.svg");
+
+/// Injected into every main-frame document (defines `window.__chad` on tarkovtracker.org only), with the exe icon
+/// filled in for the ChadScanner Fill button.
+pub fn script() -> String {
+    SCRIPT.replacen("CHAD_ICON_SVG", &js(ICON_SVG), 1)
+}
 
 fn js(s: &str) -> String {
     serde_json::to_string(s).expect("string serialises")
@@ -55,8 +61,8 @@ pub fn fill_script(id: &str, name: &str, targets: &[Target], counts: &[u32], fir
 pub enum Message {
     Toast { title: String, body: String, warn: bool },
     Log(String),
-    /// ChadScanner Fill clicked in the item popup: the popup's collected FIR / non-FIR totals for item `id`.
-    Fill { id: String, fir: u32, non_fir: u32 },
+    /// ChadScanner Fill clicked in the item popup for item `id`: what the popup showed.
+    Fill { id: String, popup: Popup },
     /// The site's own progress for its current game mode (`pvp`/`pve`/`seasonal`), by objective and hideout-part id.
     Progress { mode: String, objectives: HashMap<String, ObjectiveProgress>, parts: HashMap<String, PartProgress> },
 }
@@ -72,8 +78,23 @@ fn counts<T>(v: Option<&serde_json::Value>, make: impl Fn(bool, u32) -> T) -> Ha
         .collect()
 }
 
+/// One `{"kind":"task"|"hideout","group","fir","count"}` popup row; malformed rows → None.
+fn popup_row(v: &serde_json::Value) -> Option<PopupRow> {
+    let kind = match v.get("kind")?.as_str()? {
+        "task" => TargetKind::Task,
+        "hideout" => TargetKind::Hideout,
+        _ => return None,
+    };
+    Some(PopupRow {
+        kind,
+        group: v.get("group")?.as_str()?.to_owned(),
+        fir: v.get("fir").and_then(|b| b.as_bool()).unwrap_or(false),
+        count: v.get("count").and_then(|c| c.as_f64()).unwrap_or(0.0).max(0.0) as u32,
+    })
+}
+
 /// A page message: `{"toast":{"title","body","warn"}}`, `{"progress":{"mode","objectives","parts"}}`,
-/// `{"fill":{"id","fir","nonFir"}}` or `{"log":"…"}`; anything else → None.
+/// `{"fill":{"id","fir","nonFir","rows":[{"kind","group","fir","count"}]}}` or `{"log":"…"}`; anything else → None.
 pub fn parse(msg: &str) -> Option<Message> {
     let v: serde_json::Value = serde_json::from_str(msg).ok()?;
     if let Some(t) = v.get("toast") {
@@ -92,7 +113,8 @@ pub fn parse(msg: &str) -> Option<Message> {
     }
     if let Some(f) = v.get("fill") {
         let n = |k: &str| f.get(k).and_then(|c| c.as_f64()).unwrap_or(0.0).max(0.0) as u32;
-        return Some(Message::Fill { id: f.get("id")?.as_str()?.to_owned(), fir: n("fir"), non_fir: n("nonFir") });
+        let rows = f.get("rows").and_then(serde_json::Value::as_array).map_or_else(Vec::new, |a| a.iter().filter_map(popup_row).collect());
+        return Some(Message::Fill { id: f.get("id")?.as_str()?.to_owned(), popup: Popup { fir: n("fir"), non_fir: n("nonFir"), rows } });
     }
     Some(Message::Log(v.get("log")?.as_str()?.to_owned()))
 }
@@ -149,11 +171,22 @@ mod tests {
 
     #[test]
     fn parses_fill() {
+        let row = |kind, group: &str, fir, count| PopupRow { kind, group: group.into(), fir, count };
         assert_eq!(
-            parse(r#"{"fill":{"id":"i","fir":2,"nonFir":1}}"#),
-            Some(Message::Fill { id: "i".into(), fir: 2, non_fir: 1 })
+            parse(
+                r#"{"fill":{"id":"i","fir":2,"nonFir":1,"rows":[{"kind":"task","group":"t1","fir":true,"count":2},
+                {"kind":"hideout","group":"h1"},{"kind":"x","group":"g"},{"kind":"task"}]}}"#
+            ),
+            Some(Message::Fill {
+                id: "i".into(),
+                popup: Popup {
+                    fir: 2,
+                    non_fir: 1,
+                    rows: vec![row(TargetKind::Task, "t1", true, 2), row(TargetKind::Hideout, "h1", false, 0)],
+                },
+            })
         );
-        assert_eq!(parse(r#"{"fill":{"id":"i"}}"#), Some(Message::Fill { id: "i".into(), fir: 0, non_fir: 0 }));
+        assert_eq!(parse(r#"{"fill":{"id":"i"}}"#), Some(Message::Fill { id: "i".into(), popup: Popup::default() }));
         assert_eq!(parse(r#"{"fill":{}}"#), None);
     }
 

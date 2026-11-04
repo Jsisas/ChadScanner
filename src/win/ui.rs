@@ -89,8 +89,8 @@ pub trait TrayActions {
     fn update(&self);
     /// A toast about the TarkovTracker window (`warn`: amber, else green).
     fn tracker_toast(&self, title: &str, body: &str, warn: bool);
-    /// ChadScanner Fill clicked in the TarkovTracker popup for item `id` with the collected totals.
-    fn tracker_fill(&self, id: &str, fir: u32, non_fir: u32);
+    /// ChadScanner Fill clicked in the TarkovTracker popup for item `id`: what the popup showed.
+    fn tracker_fill(&self, id: &str, popup: crate::needs::Popup);
     /// The TarkovTracker window reported its own progress for `mode` (`pvp`/`pve`/`seasonal`).
     fn tracker_progress(
         &self,
@@ -341,7 +341,7 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                         match crate::tracker::parse(&m) {
                             Some(crate::tracker::Message::Toast { title, body, warn }) => actions.tracker_toast(&title, &body, warn),
                             Some(crate::tracker::Message::Log(s)) => log::info!("{s}"),
-                        Some(crate::tracker::Message::Fill { id, fir, non_fir }) => actions.tracker_fill(&id, fir, non_fir),
+                            Some(crate::tracker::Message::Fill { id, popup }) => actions.tracker_fill(&id, popup),
                             Some(crate::tracker::Message::Progress { mode, objectives, parts }) => {
                                 actions.tracker_progress(&mode, objectives, parts)
                             }

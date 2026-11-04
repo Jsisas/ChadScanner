@@ -77,7 +77,7 @@ impl Tracker {
         let sink = messages.clone();
         let webview = wry::WebViewBuilder::new_with_web_context(&mut context)
             .with_url(tracker::START_URL)
-            .with_initialization_script_for_main_only(tracker::SCRIPT, true)
+            .with_initialization_script_for_main_only(tracker::script(), true)
             .with_ipc_handler(move |req| sink.borrow_mut().push(req.into_body()))
             // The OAuth login (Supabase) opens a popup that postMessages its opener; wry denies popups by default.
             .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Allow)

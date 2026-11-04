@@ -119,8 +119,9 @@
     postProgress();
   }
 
-  // ChadScanner Fill: sets every target to its entry of `counts` (the app's from-scratch split of the popup's
-  // collected totals in card order). Paired finds are only raised: a find can legitimately exceed the hand-in.
+  // ChadScanner Fill: sets every target to its entry of `counts`, the app's from-scratch split of the popup's
+  // Collected totals over the popup's rows in card order. Paired finds are only raised: a find can legitimately
+  // exceed the hand-in.
   async function fill(id, name, targets, counts, firLeft, nonFirLeft) {
     // The click came from the open popup; never open one here.
     if (!modalFor(id)) return toast(name, 'popup closed', true);
@@ -196,6 +197,26 @@
     const input = box.querySelector('input');
     return Number(input ? input.value : box.textContent.replace(/\D/g, '')) || 0;
   };
+  // The popup's need rows: task / station level id (from the row's link), FIR, and the count shown ("x/y", at most
+  // y, as the Collected totals count it). The app fills only these and leaves the counts of rows it cannot fill.
+  const INCREASE_ROW = 'button[aria-label^="Increase objective count for"],button[aria-label^="Increase hideout count for"]';
+  const popupRows = (m) =>
+    [...m.querySelectorAll('a[href]')].flatMap((a) => {
+      const u = new URL(a.getAttribute('href'), location.href);
+      if (u.origin !== location.origin) return [];
+      const kind = /\/tasks$/.test(u.pathname) ? 'task' : /\/hideout$/.test(u.pathname) ? 'hideout' : null;
+      const group = kind && u.searchParams.get(kind === 'task' ? 'task' : 'module');
+      if (!group) return [];
+      let row = a.parentElement;
+      while (row && row !== m && !row.querySelector(INCREASE_ROW)) row = row.parentElement;
+      if (!row || row === m || row.querySelectorAll(INCREASE_ROW).length !== 1) return [];
+      const shown = /([\d,.\s]+)\/([\d,.\s]+)/.exec(row.querySelector('button[aria-label="Click to enter value"]')?.textContent || '');
+      const num = (s) => Number(s.replace(/\D/g, '')) || 0;
+      const fir = [...row.querySelectorAll('span')].some((s) => s.textContent.trim() === 'FIR');
+      return [{ kind, group, fir, count: shown ? Math.min(num(shown[1]), num(shown[2])) : 0 }];
+    });
+  // ChadScanner's icon (assets/icon.svg, filled in by the app) for the Fill button.
+  const ICON = 'data:image/svg+xml,' + encodeURIComponent(CHAD_ICON_SVG);
   const missingSmartFill = new WeakSet();
   function ensureButton() {
     const m = itemModal();
@@ -208,13 +229,17 @@
     const b = document.createElement('button');
     b.type = 'button';
     b.className = sf.className;
-    b.textContent = 'ChadScanner Fill';
+    const icon = document.createElement('img');
+    icon.src = ICON;
+    icon.alt = '';
+    icon.className = 'mr-1 h-4 w-4 shrink-0';
+    b.append(icon, 'ChadScanner Fill');
     b.dataset.chadFill = '1';
     b.title = "Distribute the collected counts in ChadScanner's card order";
     b.onclick = () => {
       const id = modalItemId(m);
       if (!id) return log('tracker: fill: no item id');
-      post({ fill: { id, fir: collected(m, 'FIR'), nonFir: collected(m, 'Non-FIR') } });
+      post({ fill: { id, fir: collected(m, 'FIR'), nonFir: collected(m, 'Non-FIR'), rows: popupRows(m) } });
     };
     sf.after(b);
   }
