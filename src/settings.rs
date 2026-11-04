@@ -362,7 +362,9 @@ impl SettingsApp {
     fn about_page(&mut self, ui: &mut egui::Ui) {
         section(ui, "ChadScanner", |ui| {
             ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-            hint(ui, "Item data: json.tarkov.dev · Recognition: ChadVision");
+            hint(ui, "Item data: tarkov.dev · Recognition: ChadVision · Tracker: TarkovTracker.io");
+            hint(ui, "Quest/hideout need rules ported from RatScanner (Elastic License 2.0).");
+            hint(ui, "Not affiliated with Battlestate Games. Escape from Tarkov is their trademark.");
             ui.horizontal(|ui| {
                 if ui.button("Open log file").clicked() {
                     let _ = std::process::Command::new("notepad.exe").arg(self.paths.log()).spawn();

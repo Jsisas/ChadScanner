@@ -128,7 +128,7 @@ to English.
 
 ## For developers
 
-Native Windows app written in Rust. Successor of the C# RatScanner fork; recognition is done by
+Standalone native Windows app written in Rust; recognition is done by
 [ChadVision](https://github.com/Jsisas/ChadVision) (icon embedding + OCR of EFT's hover tooltip).
 
 ### Build (WSL / Linux)
