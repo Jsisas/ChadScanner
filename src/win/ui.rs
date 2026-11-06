@@ -48,10 +48,10 @@ pub enum Cmd {
     },
     /// ChadScanner's game mode (`Mode::key()`) changed: switch the TarkovTracker window's site to it.
     TrackerMode(String),
-    /// A raid started: show this map (`maps::MapView` JSON) in the ChadScanner window.
-    RaidMap(String),
-    /// Extract names the player's own exfil panel lists; the map narrows to them.
-    RaidExtracts(Vec<String>),
+    /// A raid started: open tarkovtracker.org's map of this location (tarkov.dev map id) in the ChadScanner window.
+    RaidMap { id: String, rotation: f64 },
+    /// Extract names the player's own exfil panel lists and the raid side (`Side::key()`) once known; the map narrows to them.
+    RaidExtracts { names: Vec<String>, side: Option<&'static str> },
     /// The player's position from an EFT screenshot (`screenshot::Position` JSON); the map marks it.
     RaidPosition(String),
     /// The raid is over: the window returns to TarkovTracker.
@@ -347,14 +347,14 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                                 t.mode(&m);
                             }
                         }
-                        Cmd::RaidMap(json) => {
+                        Cmd::RaidMap { id, rotation } => {
                             if let Some(t) = tracker.as_mut() {
-                                t.raid_map(&json);
+                                t.raid_map(&id, rotation);
                             }
                         }
-                        Cmd::RaidExtracts(names) => {
+                        Cmd::RaidExtracts { names, side } => {
                             if let Some(t) = tracker.as_mut() {
-                                t.raid_extracts(&names);
+                                t.raid_extracts(&names, side);
                             }
                         }
                         Cmd::RaidPosition(json) => {

@@ -583,10 +583,10 @@ impl App {
             return self.toast("Raid map unavailable", "map data not downloaded yet", card::AMBER);
         };
         match all.for_scene(scene) {
-            Some(view) => match serde_json::to_string(view) {
-                Ok(json) => self.ui.send(ui::Cmd::RaidMap(json)),
-                Err(e) => log::warn!("raid map {scene}: {e}"),
-            },
+            Some(view) => {
+                log::info!("raid: {} map ({})", view.name, view.id);
+                self.ui.send(ui::Cmd::RaidMap { id: view.id.clone(), rotation: view.rotation });
+            }
             None => {
                 log::warn!("raid: no map for {scene}");
                 self.toast("No map for this location", scene, card::GREY);
@@ -594,7 +594,7 @@ impl App {
         }
     }
 
-    /// Reads the extraction list EFT shows at spawn and tells the map to show only those extracts.
+    /// Reads the extraction list EFT shows at spawn, or after the player's show-exits key, tells the map to show only those extracts, then stops capturing; extracts don't change during a raid.
     fn read_exfils(self: &Arc<Self>, scene: String) {
         let app = self.clone();
         let spawn = std::thread::Builder::new().name("exfils".into()).spawn(move || app.exfil_loop(&scene));
@@ -605,18 +605,51 @@ impl App {
 
     fn exfil_loop(&self, scene: &str) {
         const POLL: Duration = Duration::from_millis(500);
-        const WINDOW: Duration = Duration::from_secs(30);
-        let deadline = Instant::now() + WINDOW;
-        let (mut best, mut previous): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
-        while Instant::now() < deadline {
+        const HINT_AFTER: Duration = Duration::from_secs(30);
+        const BURST: Duration = Duration::from_secs(10);
+        let start = Instant::now();
+        let mut miss: Option<(image::RgbImage, bool)> = None;
+        let mut side: Option<maps::Side> = None;
+        let (mut previous, mut sent): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+        let (mut polls, mut focused, mut reads, mut hinted, mut diag) = (0u32, 0u32, 0u32, false, 0u32);
+        let mut stable = 0u32;
+        loop {
             std::thread::sleep(POLL);
             if self.raid_scene().as_deref() != Some(scene) {
                 return;
             }
             let Some(engine) = self.engine.get() else { return };
+            if !hinted && sent.is_empty() && start.elapsed() >= HINT_AFTER {
+                hinted = true;
+                log::info!("raid: no exfil panel read in 30 s (EFT focused {focused}/{polls}, panel lines {reads}); still watching");
+                if let Some((img, panel)) = &miss {
+                    let path = self.paths.exfil_miss();
+                    match img.save(&path) {
+                        Ok(()) => log::info!(
+                            "raid: saved the missed exfil capture to {} (panel header {})",
+                            path.display(),
+                            if *panel { "found" } else { "not found" }
+                        ),
+                        Err(e) => log::warn!("raid: saving {}: {e}", path.display()),
+                    }
+                }
+                self.toast(
+                    "Extracts not read yet",
+                    &format!("Show EFT's extract list ({}) and ChadScanner will read it", win::hook::exfil_label()),
+                    card::GREY,
+                );
+            }
+            // After the spawn window, look only for a few seconds after the player opens the list.
+            let opened = win::hook::exfil_opened_age().is_some_and(|a| a < BURST && a < start.elapsed());
+            if start.elapsed() >= HINT_AFTER && !opened {
+                previous.clear();
+                continue;
+            }
+            polls += 1;
             if !win::eft_in_foreground() {
                 continue;
             }
+            focused += 1;
             let (cx, cy) = win::foreground_center();
             let (l, t, r, b) = win::monitor_rect(cx, cy);
             let x0 = l + ((r - l) as f32 * 0.70) as i32;
@@ -628,31 +661,57 @@ impl App {
                     continue;
                 }
             };
-            let names = exfil::read(&img, (b - t) as f32 / 1080.0, |line| engine.read_line(line));
+            let scale = (b - t) as f32 / 1080.0;
+            let lines = exfil::read_lines(&img, scale, |line| engine.read_line(line));
+            let names: Vec<String> = lines.iter().filter_map(|l| exfil::parse_line(l)).collect();
             if names.is_empty() {
+                let header = exfil::header(&img, scale);
+                if header.is_some() && diag < 5 {
+                    diag += 1;
+                    log::info!("raid: exfil panel seen at {header:?} but no EXIT line; OCR {lines:?}");
+                }
+                // Prefer a frame that showed the panel; never replace one with a panel-less frame.
+                if header.is_some() || !matches!(miss, Some((_, true))) {
+                    miss = Some((img, header.is_some()));
+                }
                 previous.clear();
                 continue;
             }
-            if names.len() > best.len() {
-                best = names.clone();
+            reads += 1;
+            if names != previous {
+                previous = names;
+                continue;
             }
-            if names == previous {
-                break;
+            // Two identical reads in a row: a stable panel. Union with earlier reads so a later partial OCR never shrinks the set.
+            let Some(all) = self.maps.read().unwrap().get() else { continue };
+            let Some(view) = all.for_scene(scene) else { continue };
+            let had_side = side.is_some();
+            let matched = maps::match_extracts(view, &previous, side);
+            let before = sent.clone();
+            for m in matched {
+                if !sent.contains(&m) {
+                    sent.push(m);
+                }
             }
-            previous = names;
-        }
-        if best.is_empty() {
-            return log::info!("raid: no exfil panel read");
-        }
-        if self.raid_scene().as_deref() != Some(scene) {
-            return;
-        }
-        let Some(all) = self.maps.read().unwrap().get() else { return };
-        let Some(view) = all.for_scene(scene) else { return };
-        let matched = maps::match_extracts(view, &best);
-        log::info!("raid: extracts {best:?} → {matched:?}");
-        if !matched.is_empty() {
-            self.ui.send(ui::Cmd::RaidExtracts(matched));
+            if side.is_none() {
+                if let Some(s) = view.side_of(&sent) {
+                    side = Some(s);
+                    sent.retain(|n| view.allows(s, n));
+                    log::info!("raid: {} raid (from extracts {sent:?})", s.label());
+                    self.toast(&format!("{} raid", s.label()), &view.name, card::GREEN);
+                }
+            }
+            if sent != before || side.is_some() != had_side {
+                log::info!("raid: extracts {previous:?} → {sent:?}");
+                self.ui.send(ui::Cmd::RaidExtracts { names: sent.clone(), side: side.map(maps::Side::key) });
+            }
+            // A second stable read that adds nothing: the list is complete, and extracts don't change mid-raid.
+            stable += 1;
+            if stable >= 2 && !sent.is_empty() && sent == before {
+                log::info!("raid: extracts confirmed, exfil reader stopped");
+                return;
+            }
+            previous.clear();
         }
     }
 
@@ -745,6 +804,7 @@ impl App {
     /// Marks the player on the raid map from the position EFT writes into each screenshot's file name.
     pub fn screenshot_worker(self: Arc<Self>) {
         use notify::{event::ModifyKind, EventKind, Watcher};
+        use std::sync::mpsc::RecvTimeoutError;
         let Some(docs) = directories::UserDirs::new().and_then(|u| u.document_dir().map(|d| d.to_path_buf())) else {
             log::warn!("screenshots: no Documents folder");
             return;
@@ -773,27 +833,55 @@ impl App {
             return;
         }
         let mut last = String::new();
-        for event in rx {
-            let Ok(event) = event else { continue };
+        // Screenshots that placed the arrow, deleted once EFT lets go of them.
+        let mut pending: Vec<(std::path::PathBuf, Instant)> = Vec::new();
+        loop {
+            let received = if pending.is_empty() {
+                match rx.recv() {
+                    Ok(e) => Some(e),
+                    Err(_) => return,
+                }
+            } else {
+                match rx.recv_timeout(Duration::from_millis(500)) {
+                    Ok(e) => Some(e),
+                    Err(RecvTimeoutError::Timeout) => None,
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            };
             // EFT may write a temp name and rename it, so both creation and renames count.
-            if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))) {
-                continue;
-            }
-            for path in &event.paths {
-                let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-                let Some(p) = screenshot::parse(name) else { continue };
-                if self.raid_scene().is_none() {
-                    log::debug!("screenshot {name} ignored: no raid");
-                    continue;
+            if let Some(Ok(event)) = received {
+                if matches!(event.kind, EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))) {
+                    for path in &event.paths {
+                        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+                        let Some(p) = screenshot::parse(name) else { continue };
+                        if self.raid_scene().is_none() {
+                            log::debug!("screenshot {name} ignored: no raid");
+                            continue;
+                        }
+                        // Create and rename can both fire for one file.
+                        if name == last {
+                            continue;
+                        }
+                        last = name.to_owned();
+                        log::info!("raid: position {:?} yaw {:.0}", p.pos, p.yaw);
+                        self.ui.send(ui::Cmd::RaidPosition(serde_json::to_string(&p).expect("position serialises")));
+                        pending.push((path.clone(), Instant::now()));
+                    }
                 }
-                // Create and rename can both fire for one file.
-                if name == last {
-                    continue;
-                }
-                last = name.to_owned();
-                log::info!("raid: position {:?} yaw {:.0}", p.pos, p.yaw);
-                self.ui.send(ui::Cmd::RaidPosition(serde_json::to_string(&p).expect("position serialises")));
             }
+            // EFT may still be writing the file when the create event arrives; retry until it lets go.
+            pending.retain(|(p, since)| match std::fs::remove_file(p) {
+                Ok(()) => {
+                    log::info!("screenshot deleted: {}", p.display());
+                    false
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+                Err(e) if since.elapsed() > Duration::from_secs(10) => {
+                    log::warn!("screenshot not deleted: {}: {e}", p.display());
+                    false
+                }
+                Err(_) => true,
+            });
         }
     }
 

@@ -7,6 +7,8 @@ use std::collections::HashMap;
 pub const START_URL: &str = "https://tarkovtracker.org/needed-items";
 const SCRIPT: &str = include_str!("tracker.js");
 const ICON_SVG: &str = include_str!("../assets/icon.svg");
+/// Posted by tracker.js once a document has `window.__chad`; the window then replays the raid in progress.
+pub const READY: &str = "chad-ready";
 
 /// Injected into every main-frame document (defines `window.__chad` on tarkovtracker.org only), with the exe icon
 /// filled in for the Chad Fill button.
@@ -60,6 +62,35 @@ pub fn fill_script(id: &str, name: &str, targets: &[Target], counts: &[u32], fir
 /// Switches the site to game mode `mode` (`Mode::key()`); a no-op when it already shows it.
 pub fn mode_script(mode: &str) -> String {
     format!("window.__chad&&__chad.mode({})", js(mode))
+}
+
+/// Opens the tarkovtracker.org map of the tarkov.dev map `map_id` for a raid; `rotation` is its `coordinateRotation`.
+pub fn raid_script(map_id: &str, rotation: f64) -> String {
+    format!("window.__chad&&__chad.raid({},{rotation})", js(map_id))
+}
+
+/// Shows only the extracts named in `names` on the raid map; `side` ("pmc"/"scav") picks the Chad-mode layers.
+pub fn raid_extracts_script(names: &[String], side: Option<&str>) -> String {
+    format!(
+        "window.__chad&&__chad.raidExtracts({},{})",
+        serde_json::to_string(names).expect("strings serialise"),
+        serde_json::to_string(&side).expect("option serialises")
+    )
+}
+
+/// Draws the player's arrow; `position_json` is `{"pos":[z,x],"yaw":degrees}`.
+pub fn here_script(position_json: &str) -> String {
+    format!("window.__chad&&__chad.here({position_json})")
+}
+
+/// Brings the raid map back (after an item page replaced it).
+pub fn raid_show_script() -> &'static str {
+    "window.__chad&&__chad.raidShow()"
+}
+
+/// Ends the raid: arrow and extract filter go, the page returns to where it was before the raid.
+pub fn raid_end_script() -> &'static str {
+    "window.__chad&&__chad.raidEnd()"
 }
 
 #[derive(Debug, PartialEq)]
@@ -147,6 +178,15 @@ mod tests {
     #[test]
     fn mode_script_passes_the_key() {
         assert_eq!(mode_script("pve"), r#"window.__chad&&__chad.mode("pve")"#);
+    }
+
+    #[test]
+    fn raid_extracts_script_passes_the_side() {
+        assert_eq!(
+            raid_extracts_script(&["A".into()], Some("pmc")),
+            r#"window.__chad&&__chad.raidExtracts(["A"],"pmc")"#
+        );
+        assert_eq!(raid_extracts_script(&[], None), r#"window.__chad&&__chad.raidExtracts([],null)"#);
     }
 
     #[test]

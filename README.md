@@ -104,16 +104,12 @@ to English.
 
 ## Raid map
 
-EFT's logs tell ChadScanner when a raid starts and ends. At spawn the same window switches to a map of the
-location (tarkov.dev's maps) with the PMC spawns and PMC extracts; it is shown without taking focus from EFT, even if
-you had closed it. ChadScanner also reads the extraction list EFT shows at spawn (`EXIT01 …`, EFT focused, Borderless) and
-narrows the map to your own extracts; tick off **Only my extracts** to see all of them again. The checkboxes **PMC spawns**,
-**PMC extracts** and **Only my extracts** apply until ChadScanner quits.
+EFT's logs tell ChadScanner when a raid starts and ends. At spawn the ChadScanner window opens [tarkovtracker.org](https://tarkovtracker.org)'s own map of the location (the same one that shows your quest objectives); it is shown without taking focus from EFT, even if you had closed it. ChadScanner also reads the extraction list EFT shows at spawn (`EXIT01 …`, EFT focused, Borderless) and hides every extract that is not on your list. TarkovTracker's own PMC / Scav / spawn toggles still apply.
 
 - A scan in raid shows the item page; when the card closes (cursor leaves it, or its timeout) the window returns to the map.
-- When the raid ends (or EFT quits) the window returns to TarkovTracker; scans outside a raid never switch back.
-- Press EFT's screenshot key (PrtScn by default) in raid and the map marks where you stand and which way you face, read from the screenshot's file name in `Documents\Escape from Tarkov\Screenshots`. The marker stays until the next screenshot or raid.
-- Map data: json.tarkov.dev (spawns, extracts) and the [tarkov.dev](https://github.com/the-hideout/tarkov-dev) map tiles, cached for 24 h.
+- When the raid ends (or EFT quits) the window returns to the page it showed before the raid; scans outside a raid never switch back.
+- Press EFT's screenshot key (PrtScn by default) in raid and the map draws a yellow arrow where you stand and which way you face, read from the screenshot's file name in `Documents\Escape from Tarkov\Screenshots`. The map pans only when the arrow is off-screen. The screenshot file is then deleted; screenshots without coordinates (menus) and ones taken while ChadScanner saw no raid are kept. The arrow stays until the next screenshot or raid end.
+- Map data: json.tarkov.dev (map ids, extract names) and [tarkov.dev](https://github.com/the-hideout/tarkov-dev)'s `maps.json` (map rotation), cached for 24 h.
   With no data yet the toast **Raid map unavailable** shows; for a location without a map, **No map for this location**.
 
 ## Troubleshooting
@@ -138,7 +134,7 @@ narrows the map to your own extracts; tick off **Only my extracts** to see all o
 - Quests only TarkovTracker adds (e.g. "Pay the Fare!"): its `tasks-core` endpoint, merged in when json.tarkov.dev lacks them.
 - Progress: [TarkovTracker](https://tarkovtracker.org) API or the local file.
 - Quest events, game mode, raid start/end: EFT's own log files.
-- Raid maps: json.tarkov.dev (`maps`) and tarkov.dev's `maps.json` map configuration; tiles load from assets.tarkov.dev.
+- Raid maps: json.tarkov.dev (`maps`) and tarkov.dev's `maps.json` map configuration; the map itself is tarkovtracker.org's.
 
 ## For developers
 

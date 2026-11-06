@@ -7,8 +7,8 @@ mod card;
 mod config;
 mod data;
 mod eftlog;
+mod eftkeys;
 mod exfil;
-mod map;
 mod maps;
 mod needs;
 mod progress;
@@ -126,7 +126,9 @@ fn run() -> anyhow::Result<()> {
     std::thread::Builder::new().name("steps".into()).spawn(move || steps.step_worker(step_rx))?;
     let upd = app.clone();
     std::thread::Builder::new().name("update".into()).spawn(move || upd.update_worker())?;
-    win::hook::start(scan_tx, step_tx, cfg.hotkey, cfg.progress_keys);
+    let exfil_key = eftkeys::load();
+    log::info!("exfil key: {}", exfil_key.label);
+    win::hook::start(scan_tx, step_tx, cfg.hotkey, cfg.progress_keys, exfil_key);
 
     let actions: Arc<app::App> = app;
     win::ui::run(&ui, ui_rx, &actions, &paths, cfg.mode.key())?;

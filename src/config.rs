@@ -277,6 +277,10 @@ impl Paths {
     pub fn logstate(&self) -> PathBuf {
         self.appdata.join("logstate.json")
     }
+    /// Last panel capture when no extract was read in a raid's first 30 s (overwritten each time).
+    pub fn exfil_miss(&self) -> PathBuf {
+        self.appdata.join("exfil-miss.png")
+    }
     pub fn reports(&self) -> PathBuf {
         self.appdata.join("reports")
     }
