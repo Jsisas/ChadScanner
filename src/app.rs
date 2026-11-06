@@ -24,6 +24,10 @@ const MARGIN: f32 = 0.02;
 const REJECT_SECONDS: f32 = 1.5;
 /// Wait before the second look at an uncertain scan.
 const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
+/// EFT writes its logs many times a second (flea searches); one poll per second covers them all.
+const LOG_POLL_GAP: Duration = Duration::from_secs(1);
+/// `logstate.json` is rewritten at most this often unless a poll produced events.
+const LOG_SAVE_GAP: Duration = Duration::from_secs(30);
 
 /// What a scan saw and decided; saved by the debug report.
 struct LastScan {
@@ -691,8 +695,13 @@ impl App {
         tailer.state.save(&state_path);
 
         let (tx, rx) = std::sync::mpsc::channel();
-        let mut watcher = notify::recommended_watcher(move |_| {
-            let _ = tx.send(());
+        let root = dir.clone();
+        let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            // Only the tracked logs and new session folders matter; EFT writes many other logs constantly.
+            let relevant = res.map_or(true, |e| e.paths.iter().any(|p| eftlog::tracked(p) || p.parent() == Some(root.as_path())));
+            if relevant {
+                let _ = tx.send(());
+            }
         })
         .ok();
         if let Some(w) = watcher.as_mut() {
@@ -700,23 +709,35 @@ impl App {
                 log::warn!("log watcher: {e}; polling only");
             }
         }
+        let mut last_poll = Instant::now() - LOG_POLL_GAP;
+        let mut last_save = Instant::now();
+        let mut dirty = false;
         loop {
             // Change notification or the 2 s poll fallback, whichever comes first.
             let _ = rx.recv_timeout(Duration::from_secs(2));
+            if let Some(wait) = LOG_POLL_GAP.checked_sub(last_poll.elapsed()) {
+                std::thread::sleep(wait);
+            }
             while rx.try_recv().is_ok() {}
             if !self.cfg.read().unwrap().log_tracking {
                 continue;
             }
+            last_poll = Instant::now();
             let before = tailer.state.clone();
-            for e in tailer.poll() {
-                self.apply_event(&e, false);
+            let events = tailer.poll();
+            let any = !events.is_empty();
+            for e in &events {
+                self.apply_event(e, false);
             }
             // EFT quit or crashed mid-raid: the log has no end line.
             if self.raid_scene().is_some() && !win::eft_running() {
                 self.apply_event(&Event::RaidEnded, false);
             }
-            if tailer.state != before {
+            dirty |= tailer.state != before;
+            if dirty && (any || last_save.elapsed() >= LOG_SAVE_GAP) {
                 tailer.state.save(&state_path);
+                last_save = Instant::now();
+                dirty = false;
             }
         }
     }

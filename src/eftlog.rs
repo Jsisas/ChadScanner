@@ -118,7 +118,7 @@ pub fn session_key(name: &str) -> Option<(u32, u32, u32, u32, u32, u32)> {
     Some((n(1)?, n(2)?, n(3)?, n(4)?, n(5)?, n(6)?))
 }
 
-fn tracked(file: &Path) -> bool {
+pub fn tracked(file: &Path) -> bool {
     let name = file.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     name.ends_with(".log") && (name.contains("push-notifications") || name.contains("application"))
 }
@@ -129,13 +129,13 @@ pub fn sessions(logs: &Path) -> Vec<(String, PathBuf)> {
         .into_iter()
         .flatten()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_dir())
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
             session_key(&name).map(|_| (name, e.path()))
         })
         .collect();
-    v.sort_by_key(|(n, _)| session_key(n));
+    v.sort_by_cached_key(|(n, _)| session_key(n));
     v
 }
 
