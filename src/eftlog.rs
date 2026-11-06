@@ -14,6 +14,12 @@ pub enum Event {
     /// `soldItem` template id and count from `systemData`, when present.
     FleaSold { item: Option<String>, count: Option<u64> },
     SessionMode(Mode),
+    /// The raid map was chosen; carries the scene path (e.g. `maps/customs_preset.bundle`).
+    RaidLoading(String),
+    /// The player spawned into the raid.
+    RaidStarted,
+    /// Raid over, or back in the menu.
+    RaidEnded,
 }
 
 const FLEA_TEMPLATE: &str = "5bdabfb886f7743e152e867e 0";
@@ -26,6 +32,12 @@ static LINE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 static SESSION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)Session mode: (?P<mode>[^\s|]+)").unwrap());
+static SCENE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\|application\|scene preset path:(?P<scene>maps/[A-Za-z0-9_]+\.bundle)").unwrap());
+static STARTED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\|application\|GameStarted:").unwrap());
+static MENU: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\|application\|(Init: pstrGameVersion|Network game matching (aborted|cancelled))").unwrap()
+});
 static ENTRY_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}").unwrap());
 static SESSION_DIR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^log_(\d{4})\.(\d{2})\.(\d{2})_(\d{1,2})-(\d{2})-(\d{2})").unwrap());
@@ -58,6 +70,18 @@ pub fn parse(chunk: &str) -> Vec<Event> {
     let mut out = Vec::new();
     for c in LINE.captures_iter(chunk) {
         let message = &c["message"];
+        if let Some(s) = SCENE.captures(message) {
+            out.push(Event::RaidLoading(s["scene"].to_owned()));
+            continue;
+        }
+        if STARTED.is_match(message) {
+            out.push(Event::RaidStarted);
+            continue;
+        }
+        if MENU.is_match(message) || message.contains("| UserMatchOver") {
+            out.push(Event::RaidEnded);
+            continue;
+        }
         if let Some(s) = SESSION.captures(message) {
             if let Some(mode) = Mode::from_session(&s["mode"]) {
                 out.push(Event::SessionMode(mode));
@@ -315,5 +339,18 @@ mod tests {
     #[test]
     fn parses_crlf_log() {
         assert_eq!(parse(&LOG.replace('\n', "\r\n")), parse(LOG));
+    }
+
+    #[test]
+    fn parses_raid_lifecycle() {
+        let log = "2026-11-06 12:06:31.051|1.3.0.1.48558|Info|application|scene preset path:maps/customs_preset.bundle rcid:bigmap.scenespreset.asset\n\
+            2026-11-06 12:07:35.942|1.3.0.1.48558|Info|application|GameStarted:52.9(0) real:65.6(0) diff:12.69\n\
+            2026-11-06 01:31:03.316|1.3.0.1.48558|Debug|application|Init: pstrGameVersion: Escape from Tarkov 1.3.0.1.48558, uiAddress: 0, usPort: 0\n\
+            2026-11-06 01:31:04.000|1.3.0.1.48558|Info|push-notifications|Got notification | UserMatchOver\n{\n \"type\": \"UserMatchOver\"\n}\n";
+        let want = vec![Event::RaidLoading("maps/customs_preset.bundle".into()), Event::RaidStarted, Event::RaidEnded, Event::RaidEnded];
+        assert_eq!(parse(log), want);
+        assert_eq!(parse(&log.replace('\n', "\r\n")), want);
+        // A `|output|application|GameStarted:` line matches too; harmless because output_000.log is not tracked.
+        assert_eq!(parse("2026-11-06 12:07:35.942|1.3.0.1.48558|Info|output|application|GameStarted:1(0)\n"), vec![Event::RaidStarted]);
     }
 }

@@ -147,6 +147,26 @@ pub fn installed_data_key(install: &Path) -> Option<String> {
     (!key.is_empty()).then(|| key.to_string())
 }
 
+/// Files `Engine::open` cannot start without, relative to a data folder.
+const REQUIRED_DATA: [&str; 6] = [
+    "refs/catalog.json",
+    "models/dinov2-small.onnx",
+    "models/ppocrv5_latin_rec.onnx",
+    "models/ppocrv5_latin_dict.txt",
+    "index/embed_ids.txt",
+    "index/embed_dinov2-small.bin",
+];
+
+/// Error naming the first of `REQUIRED_DATA` missing from `data` (a `data` folder path).
+pub fn check_data(data: &Path) -> anyhow::Result<()> {
+    for f in REQUIRED_DATA {
+        if !data.join(f).is_file() {
+            bail!("{} missing", data.join(f).display());
+        }
+    }
+    Ok(())
+}
+
 /// Downloads and unpacks release `m` into `<install>\update\`. The data zip is fetched only when
 /// its key differs from the installed one. Leaves nothing behind on error.
 pub fn stage(agent: &ureq::Agent, m: &Manifest, install: &Path) -> anyhow::Result<()> {
@@ -163,6 +183,7 @@ pub fn stage(agent: &ureq::Agent, m: &Manifest, install: &Path) -> anyhow::Resul
             let zip = dir.join("data.zip");
             download(agent, &m.data, &zip)?;
             extract(&zip, &dir)?;
+            check_data(&dir.join("data")).context("downloaded data incomplete")?;
             std::fs::remove_file(&zip)?;
         }
         if !dir.join(EXE).is_file() {
@@ -213,6 +234,10 @@ pub fn finish(install: &Path) -> anyhow::Result<bool> {
     }
     let data = dir.join("data");
     if data.exists() {
+        if let Err(e) = check_data(&data) {
+            let _ = remove_dir_if_exists(&dir);
+            return Err(e).context("staged data incomplete");
+        }
         let live = install.join("data");
         let backup = install.join("data.old");
         remove_dir_if_exists(&backup)?;
@@ -245,6 +270,8 @@ pub fn install_data(agent: &ureq::Agent, install: &Path) -> anyhow::Result<()> {
         let zip = dir.join("data.zip");
         download(agent, &m.data, &zip)?;
         extract(&zip, &dir)?;
+        check_data(&dir.join("data")).context("downloaded data incomplete")?;
+        remove_dir_if_exists(&install.join("data"))?;
         std::fs::rename(dir.join("data"), install.join("data")).context("moving data into place")?;
         Ok(())
     };
@@ -299,6 +326,9 @@ mod tests {
         put(d.join("update/ready"), "");
         put(d.join("update/onnxruntime.dll"), "new");
         put(d.join("update/data/key.txt"), "new");
+        for f in REQUIRED_DATA {
+            put(d.join("update/data").join(f), "new");
+        }
         put(d.join("data/key.txt"), "old");
         put(d.join("onnxruntime.dll"), "old");
         put(d.join("chadscanner.exe.old"), "old");
@@ -316,6 +346,31 @@ mod tests {
         put(d.join("update/data/key.txt"), "new");
         put(d.join("data/key.txt"), "old");
         assert!(!finish(&d).unwrap());
+        assert_eq!(std::fs::read_to_string(d.join("data/key.txt")).unwrap(), "old");
+        assert!(!d.join("update").exists());
+    }
+
+    #[test]
+    fn check_data_names_first_missing_file() {
+        let d = tmp("check-data");
+        for f in REQUIRED_DATA {
+            if f != "models/dinov2-small.onnx" {
+                put(d.join("data").join(f), "x");
+            }
+        }
+        let err = check_data(&d.join("data")).unwrap_err().to_string();
+        assert!(err.ends_with("dinov2-small.onnx missing"), "{err}");
+        put(d.join("data/models/dinov2-small.onnx"), "x");
+        check_data(&d.join("data")).unwrap();
+    }
+
+    #[test]
+    fn finish_keeps_live_data_when_stage_is_incomplete() {
+        let d = tmp("finish-incomplete");
+        put(d.join("update/ready"), "");
+        put(d.join("update/data/refs/catalog.json"), "new");
+        put(d.join("data/key.txt"), "old");
+        assert!(finish(&d).is_err());
         assert_eq!(std::fs::read_to_string(d.join("data/key.txt")).unwrap(), "old");
         assert!(!d.join("update").exists());
     }

@@ -642,7 +642,7 @@ pub fn load_cached(cache_dir: &Path, mode: Mode) -> Option<Catalog> {
     Catalog::build(&bodies).map_err(|e| log::warn!("cached {} data unusable: {e:#}", mode.api())).ok()
 }
 
-fn agent() -> anyhow::Result<ureq::Agent> {
+pub(crate) fn agent() -> anyhow::Result<ureq::Agent> {
     Ok(ureq::AgentBuilder::new()
         .tls_connector(Arc::new(native_tls::TlsConnector::new()?))
         .timeout(Duration::from_secs(60))

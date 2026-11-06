@@ -32,21 +32,17 @@ pub mod registry {
     }
 }
 
-/// Whether the foreground window belongs to `EscapeFromTarkov.exe`.
-pub fn eft_in_foreground() -> bool {
+/// Whether process `pid` runs `EscapeFromTarkov.exe`.
+fn is_eft(pid: u32) -> bool {
     use windows::core::PWSTR;
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    if pid == 0 {
+        return false;
+    }
     unsafe {
-        let hwnd = GetForegroundWindow();
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        if pid == 0 {
-            return false;
-        }
         let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
         let mut buf = [0u16; 1024];
         let mut len = buf.len() as u32;
@@ -54,6 +50,41 @@ pub fn eft_in_foreground() -> bool {
         let _ = CloseHandle(h);
         ok && String::from_utf16_lossy(&buf[..len as usize]).to_ascii_lowercase().ends_with("escapefromtarkov.exe")
     }
+}
+
+/// Whether the foreground window belongs to `EscapeFromTarkov.exe`.
+pub fn eft_in_foreground() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    let mut pid = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(GetForegroundWindow(), Some(&mut pid));
+    }
+    is_eft(pid)
+}
+
+/// Whether any `EscapeFromTarkov.exe` process exists.
+pub fn eft_running() -> bool {
+    use windows::Win32::System::ProcessStatus::EnumProcesses;
+    let mut pids = [0u32; 4096];
+    let mut bytes = 0u32;
+    let listed = unsafe { EnumProcesses(pids.as_mut_ptr(), std::mem::size_of_val(&pids) as u32, &mut bytes) };
+    if listed.is_err() {
+        // Cannot tell: treat as running so a raid is never cut short by a failed query.
+        return true;
+    }
+    let n = bytes as usize / std::mem::size_of::<u32>();
+    pids[..n].iter().any(|&p| is_eft(p))
+}
+
+/// Centre of the foreground window in screen coordinates; picks the monitor EFT is on.
+pub fn foreground_center() -> (i32, i32) {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect};
+    let mut r = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(GetForegroundWindow(), &mut r);
+    }
+    ((r.left + r.right) / 2, (r.top + r.bottom) / 2)
 }
 
 /// Monitor rectangle (left, top, right, bottom) containing a point.

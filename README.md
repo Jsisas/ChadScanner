@@ -102,6 +102,19 @@ to English.
   With the window closed the keys work as described above, for quest objectives only.
 - The card redraws after every press from the window's own progress (same game mode only); the next API read confirms it.
 
+## Raid map
+
+EFT's logs tell ChadScanner when a raid starts and ends. At spawn the same window switches to a map of the
+location (tarkov.dev's maps) with the PMC spawns and PMC extracts; it is shown without taking focus from EFT, even if
+you had closed it. ChadScanner also reads the extraction list EFT shows at spawn (`EXIT01 …`, EFT focused, Borderless) and
+narrows the map to your own extracts; tick off **Only my extracts** to see all of them again. The checkboxes **PMC spawns**,
+**PMC extracts** and **Only my extracts** apply until ChadScanner quits.
+
+- A scan in raid shows the item page; when the card closes (cursor leaves it, or its timeout) the window returns to the map.
+- When the raid ends (or EFT quits) the window returns to TarkovTracker; scans outside a raid never switch back.
+- Map data: json.tarkov.dev (spawns, extracts) and the [tarkov.dev](https://github.com/the-hideout/tarkov-dev) map tiles, cached for 24 h.
+  With no data yet the toast **Raid map unavailable** shows; for a location without a map, **No map for this location**.
+
 ## Troubleshooting
 
 - **The card doesn't show up** → set EFT to Borderless.
@@ -116,14 +129,15 @@ to English.
 | Where | What |
 |---|---|
 | `C:\ChadScanner\` | `chadscanner.exe`, `onnxruntime.dll`, `data\` (models, index, item images) |
-| `%APPDATA%\ChadScanner\` | `config.json`, `progress.json`, `pending.json` (TarkovTracker writes waiting for retry), `logstate.json` (EFT log read position), `tracker-window.json` (TarkovTracker window position), `webview\` (its browser profile: keeps the login), `cache\` (tarkov.dev data), `reports\`, `log.txt` |
+| `%APPDATA%\ChadScanner\` | `config.json`, `progress.json`, `pending.json` (TarkovTracker writes waiting for retry), `logstate.json` (EFT log read position), `tracker-window.json` (TarkovTracker window position), `webview\` (its browser profile: keeps the login), `cache\` (tarkov.dev data, map data), `reports\`, `log.txt` |
 
 ## Data sources
 
 - Items, quests, hideout, traders, barters, crafts: [json.tarkov.dev](https://json.tarkov.dev), refreshed every 10 min.
 - Quests only TarkovTracker adds (e.g. "Pay the Fare!"): its `tasks-core` endpoint, merged in when json.tarkov.dev lacks them.
 - Progress: [TarkovTracker](https://tarkovtracker.org) API or the local file.
-- Quest events and game mode: EFT's own log files.
+- Quest events, game mode, raid start/end: EFT's own log files.
+- Raid maps: json.tarkov.dev (`maps`) and tarkov.dev's `maps.json` map configuration; tiles load from assets.tarkov.dev.
 
 ## For developers
 

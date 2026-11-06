@@ -38,7 +38,12 @@ pub fn around(x: i32, y: i32) -> anyhow::Result<Shot> {
     let y1 = (y + half).min(vy + vh);
     let (w, h) = (x1 - x0, y1 - y0);
     anyhow::ensure!(w > 0 && h > 0, "cursor outside the virtual screen");
+    Ok(Shot { image: region(x0, y0, w, h)?, mouse: (x - x0, y - y0), scale })
+}
 
+/// Captures the screen rectangle (`x0`, `y0`, `w`×`h`) with GDI `BitBlt`.
+pub fn region(x0: i32, y0: i32, w: i32, h: i32) -> anyhow::Result<RgbImage> {
+    anyhow::ensure!(w > 0 && h > 0, "empty capture region");
     unsafe {
         let screen = GetDC(None);
         let mem = CreateCompatibleDC(screen);
@@ -78,6 +83,6 @@ pub fn around(x: i32, y: i32) -> anyhow::Result<Shot> {
         })();
         let _ = DeleteDC(mem);
         ReleaseDC(None, screen);
-        Ok(Shot { image: result?, mouse: (x - x0, y - y0), scale })
+        Ok(result?)
     }
 }

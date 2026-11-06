@@ -48,6 +48,12 @@ pub enum Cmd {
     },
     /// ChadScanner's game mode (`Mode::key()`) changed: switch the TarkovTracker window's site to it.
     TrackerMode(String),
+    /// A raid started: show this map (`maps::MapView` JSON) in the ChadScanner window.
+    RaidMap(String),
+    /// Extract names the player's own exfil panel lists; the map narrows to them.
+    RaidExtracts(Vec<String>),
+    /// The raid is over: the window returns to TarkovTracker.
+    RaidEnd,
     /// Leaves the message loop (the app then exits).
     Quit,
 }
@@ -287,6 +293,10 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                     t.hide();
                     continue;
                 }
+                if msg.hwnd == t.hwnd() && msg.message == super::tracker::WM_TRACKER_RESIZE {
+                    t.fit();
+                    continue;
+                }
             }
             if msg.message == WM_HOTKEY && msg.wParam.0 == DEBUG_HOTKEY as usize {
                 actions.debug_report();
@@ -335,6 +345,21 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                                 t.mode(&m);
                             }
                         }
+                        Cmd::RaidMap(json) => {
+                            if let Some(t) = tracker.as_mut() {
+                                t.raid_map(&json);
+                            }
+                        }
+                        Cmd::RaidExtracts(names) => {
+                            if let Some(t) = tracker.as_mut() {
+                                t.raid_extracts(&names);
+                            }
+                        }
+                        Cmd::RaidEnd => {
+                            if let Some(t) = tracker.as_mut() {
+                                t.raid_end();
+                            }
+                        }
                         Cmd::UpdateLabel(t) => update.set_text(t),
                         Cmd::Quit => PostQuitMessage(0),
                     }
@@ -362,6 +387,10 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                     if until.is_some_and(|t| now >= t) || moved {
                         card.hide();
                         card_until = None;
+                        // Not from `Cmd::HideCard`: a new scan hides the old card first, and its item page must stay.
+                        if let Some(t) = tracker.as_mut() {
+                            t.card_closed();
+                        }
                     }
                 }
                 if toast_until.is_some_and(|t| now >= t) {

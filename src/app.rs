@@ -3,6 +3,8 @@ use crate::card::{self, Rgb};
 use crate::config::{Config, Mode, Paths, Source};
 use crate::data::Store;
 use crate::eftlog::{self, Event, LogState, Tailer};
+use crate::exfil;
+use crate::maps::{self, MapStore};
 use crate::needs;
 use crate::progress::{LocalSource, Notify, ObjectiveProgress, PartProgress, ProgressSource, TaskState, TrackerSource};
 use crate::win::{self, hook::ScanRequest, ui};
@@ -12,7 +14,7 @@ use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 /// Top candidate must reach this score…
 const ACCEPT: f32 = 0.55;
@@ -32,10 +34,19 @@ struct LastScan {
     ms: u128,
 }
 
+/// Where the current raid stands, from the EFT logs.
+#[derive(Default)]
+struct Raid {
+    /// Scene path from the last `scene preset path:` line.
+    scene: Option<String>,
+    in_raid: bool,
+}
+
 pub struct App {
     pub paths: Paths,
     pub cfg: RwLock<Config>,
     store: RwLock<Arc<Store>>,
+    maps: RwLock<Arc<MapStore>>,
     progress: RwLock<Arc<dyn ProgressSource>>,
     /// Set when the source is local, for reloads after Settings edits.
     local: RwLock<Option<Arc<LocalSource>>>,
@@ -56,6 +67,7 @@ pub struct App {
     update_available: Mutex<Option<crate::update::Manifest>>,
     /// Set while a tray-triggered check or install runs.
     updating: AtomicBool,
+    raid: Mutex<Raid>,
 }
 
 impl App {
@@ -70,8 +82,10 @@ impl App {
             });
             // Replaced by `rebuild_progress` below, which needs the finished `App` for its toasts.
             let initial: Arc<dyn ProgressSource> = Arc::new(LocalSource::open(paths.progress(), mode));
+            let maps = MapStore::start(mode, paths.cache());
             App {
                 paths,
+                maps: RwLock::new(maps),
                 cfg: RwLock::new(cfg),
                 store: RwLock::new(store),
                 progress: RwLock::new(initial),
@@ -87,6 +101,7 @@ impl App {
                 switch: Mutex::new(()),
                 update_available: Mutex::new(None),
                 updating: AtomicBool::new(false),
+                raid: Mutex::new(Raid::default()),
             }
         });
         app.rebuild_progress();
@@ -154,6 +169,7 @@ impl App {
                     a.toast("No item data yet – retrying", "json.tarkov.dev unreachable", card::AMBER);
                 }
             });
+            *self.maps.write().unwrap() = MapStore::start(new.mode, self.paths.cache());
             self.ui.send(ui::Cmd::TrackerMode(new.mode.key().to_owned()));
         }
         if old.mode != new.mode || old.source != new.source || old.tokens != new.tokens {
@@ -512,6 +528,126 @@ impl App {
                     None => self.toast("Flea item sold", "", card::GREEN),
                 }
             }
+            Event::RaidLoading(scene) => {
+                log::info!("{prefix}raid: loading {scene}");
+                let mut r = self.raid.lock().unwrap();
+                r.scene = Some(scene.clone());
+                r.in_raid = false;
+            }
+            Event::RaidStarted => {
+                let scene = {
+                    let mut r = self.raid.lock().unwrap();
+                    let Some(scene) = r.scene.clone() else { return };
+                    r.in_raid = true;
+                    scene
+                };
+                log::info!("{prefix}raid: started on {scene}");
+                // Catch-up only replays history: `log_worker` shows the map once it knows the raid is still running.
+                if !quiet {
+                    self.show_raid_map(&scene);
+                    self.read_exfils(scene);
+                }
+            }
+            Event::RaidEnded => {
+                let was_in_raid = {
+                    let mut r = self.raid.lock().unwrap();
+                    let was = r.in_raid;
+                    *r = Raid::default();
+                    was
+                };
+                if was_in_raid {
+                    log::info!("{prefix}raid: ended");
+                    if !quiet {
+                        self.ui.send(ui::Cmd::RaidEnd);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The scene of the raid in progress, if any.
+    fn raid_scene(&self) -> Option<String> {
+        let r = self.raid.lock().unwrap();
+        r.scene.clone().filter(|_| r.in_raid)
+    }
+
+    /// Switches the ChadScanner window to the map of `scene`.
+    fn show_raid_map(&self, scene: &str) {
+        let Some(all) = self.maps.read().unwrap().get() else {
+            log::warn!("raid: map data not downloaded yet");
+            return self.toast("Raid map unavailable", "map data not downloaded yet", card::AMBER);
+        };
+        match all.for_scene(scene) {
+            Some(view) => match serde_json::to_string(view) {
+                Ok(json) => self.ui.send(ui::Cmd::RaidMap(json)),
+                Err(e) => log::warn!("raid map {scene}: {e}"),
+            },
+            None => {
+                log::warn!("raid: no map for {scene}");
+                self.toast("No map for this location", scene, card::GREY);
+            }
+        }
+    }
+
+    /// Reads the extraction list EFT shows at spawn and tells the map to show only those extracts.
+    fn read_exfils(self: &Arc<Self>, scene: String) {
+        let app = self.clone();
+        let spawn = std::thread::Builder::new().name("exfils".into()).spawn(move || app.exfil_loop(&scene));
+        if let Err(e) = spawn {
+            log::warn!("exfil reader: {e}");
+        }
+    }
+
+    fn exfil_loop(&self, scene: &str) {
+        const POLL: Duration = Duration::from_millis(500);
+        const WINDOW: Duration = Duration::from_secs(30);
+        let deadline = Instant::now() + WINDOW;
+        let (mut best, mut previous): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+        while Instant::now() < deadline {
+            std::thread::sleep(POLL);
+            if self.raid_scene().as_deref() != Some(scene) {
+                return;
+            }
+            let Some(engine) = self.engine.get() else { return };
+            if !win::eft_in_foreground() {
+                continue;
+            }
+            let (cx, cy) = win::foreground_center();
+            let (l, t, r, b) = win::monitor_rect(cx, cy);
+            let x0 = l + ((r - l) as f32 * 0.70) as i32;
+            let h = ((b - t) as f32 * 0.55) as i32;
+            let img = match win::capture::region(x0, t, r - x0, h) {
+                Ok(i) => i,
+                Err(e) => {
+                    log::warn!("exfil capture: {e:#}");
+                    continue;
+                }
+            };
+            let names = exfil::read(&img, (b - t) as f32 / 1080.0, |line| engine.read_line(line));
+            if names.is_empty() {
+                previous.clear();
+                continue;
+            }
+            if names.len() > best.len() {
+                best = names.clone();
+            }
+            if names == previous {
+                break;
+            }
+            previous = names;
+        }
+        if best.is_empty() {
+            return log::info!("raid: no exfil panel read");
+        }
+        if self.raid_scene().as_deref() != Some(scene) {
+            return;
+        }
+        let Some(all) = self.maps.read().unwrap().get() else { return };
+        let Some(view) = all.for_scene(scene) else { return };
+        let matched = maps::match_extracts(view, &best);
+        log::info!("raid: extracts {best:?} → {matched:?}");
+        if !matched.is_empty() {
+            self.ui.send(ui::Cmd::RaidExtracts(matched));
         }
     }
 
@@ -542,6 +678,15 @@ impl App {
         for e in &events {
             self.apply_event(e, true);
         }
+        // A raid found in the replayed log shows its map only when EFT is still running; after a crash it is stale.
+        if let Some(scene) = self.raid_scene() {
+            if win::eft_running() {
+                self.show_raid_map(&scene);
+            } else {
+                log::info!("catch-up: raid on {scene} is stale (EFT not running)");
+                *self.raid.lock().unwrap() = Raid::default();
+            }
+        }
         tailer.state.save(&state_path);
 
         let (tx, rx) = std::sync::mpsc::channel();
@@ -564,6 +709,10 @@ impl App {
             let before = tailer.state.clone();
             for e in tailer.poll() {
                 self.apply_event(&e, false);
+            }
+            // EFT quit or crashed mid-raid: the log has no end line.
+            if self.raid_scene().is_some() && !win::eft_running() {
+                self.apply_event(&Event::RaidEnded, false);
             }
             if tailer.state != before {
                 tailer.state.save(&state_path);
