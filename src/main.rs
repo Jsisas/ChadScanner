@@ -86,7 +86,8 @@ fn run() -> anyhow::Result<()> {
 
     let loader = app.clone();
     std::thread::Builder::new().name("engine".into()).spawn(move || {
-        if !loader.paths.data.join("refs").join("catalog.json").exists() {
+        if let Err(e) = update::check_data(&loader.paths.data) {
+            log::warn!("item data incomplete ({e:#}); downloading");
             loader.toast("Downloading item data", "one-time, about 180 MB", card::AMBER);
             if let Err(e) = update::agent().and_then(|a| update::install_data(&a, &loader.paths.install)) {
                 log::error!("item data download: {e:#}");
@@ -122,7 +123,7 @@ fn run() -> anyhow::Result<()> {
     win::hook::start(scan_tx, step_tx, cfg.hotkey, cfg.progress_keys);
 
     let actions: Arc<app::App> = app;
-    win::ui::run(&ui, ui_rx, &actions, &paths)?;
+    win::ui::run(&ui, ui_rx, &actions, &paths, cfg.mode.key())?;
     actions.shutdown();
     log::info!("quit");
     Ok(())

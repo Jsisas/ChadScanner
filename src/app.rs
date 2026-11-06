@@ -154,6 +154,7 @@ impl App {
                     a.toast("No item data yet – retrying", "json.tarkov.dev unreachable", card::AMBER);
                 }
             });
+            self.ui.send(ui::Cmd::TrackerMode(new.mode.key().to_owned()));
         }
         if old.mode != new.mode || old.source != new.source || old.tokens != new.tokens {
             self.rebuild_progress();

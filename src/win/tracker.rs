@@ -67,10 +67,13 @@ pub struct Tracker {
     paths: Paths,
     /// Mirrors "the window is shown"; read by the key worker thread.
     open: Arc<AtomicBool>,
+    /// ChadScanner's game mode key; the site is switched to it before every action, since a freshly loaded page
+    /// misses the push made while its store was not ready.
+    mode: String,
 }
 
 impl Tracker {
-    pub fn create(paths: &Paths, open: Arc<AtomicBool>) -> anyhow::Result<Tracker> {
+    pub fn create(paths: &Paths, open: Arc<AtomicBool>, mode: &str) -> anyhow::Result<Tracker> {
         let hwnd = unsafe { create_window(paths)? };
         let mut context = wry::WebContext::new(Some(paths.webview()));
         let messages = Rc::new(RefCell::new(Vec::new()));
@@ -94,6 +97,7 @@ impl Tracker {
             last: None,
             paths: paths.clone(),
             open,
+            mode: mode.to_owned(),
         })
     }
 
@@ -116,6 +120,7 @@ impl Tracker {
         }
         self.open.store(true, Ordering::Relaxed);
         if let Some((id, name)) = &self.last {
+            self.eval(&tracker::mode_script(&self.mode));
             self.eval(&tracker::open_script(id, name));
         }
     }
@@ -137,16 +142,25 @@ impl Tracker {
         if !self.visible() {
             return;
         }
+        self.eval(&tracker::mode_script(&self.mode));
         self.eval(&tracker::open_script(id, name));
+    }
+
+    /// ChadScanner's game mode changed: switch the site to `m`.
+    pub fn mode(&mut self, m: &str) {
+        self.mode = m.to_owned();
+        self.eval(&tracker::mode_script(m));
     }
 
     /// One Arrow key press for item `id`; the script writes the chosen count into the site's progress store.
     pub fn step(&self, id: &str, name: &str, up: bool, targets: &[Target]) {
+        self.eval(&tracker::mode_script(&self.mode));
         self.eval(&tracker::step_script(id, name, up, targets));
     }
 
     /// Chad Fill for item `id`; the script sets each of `targets` to its `counts` entry in the site's progress store.
     pub fn fill(&self, id: &str, name: &str, targets: &[Target], counts: &[u32], fir_left: u32, non_fir_left: u32) {
+        self.eval(&tracker::mode_script(&self.mode));
         self.eval(&tracker::fill_script(id, name, targets, counts, fir_left, non_fir_left));
     }
 

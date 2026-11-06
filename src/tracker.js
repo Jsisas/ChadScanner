@@ -165,6 +165,18 @@
     post({ progress: { mode: s.mode, objectives: pick(s.d.taskObjectives), parts: pick(s.d.hideoutParts) } });
   }
 
+  // Switches the site to game mode `m` (`pvp`/`pve`/`seasonal`) through its own store action, which also reloads
+  // the metadata catalog and syncs the choice to the backend when signed in. ChadScanner's mode wins over the site's.
+  async function setMode(m) {
+    const store = await until(() => tarkovStore() && tarkovState() && tarkovStore(), 10000, null);
+    if (!store) return log('tracker: no progress store for mode ' + m);
+    if (tarkovState().mode === m) return;
+    if (typeof store.switchGameMode === 'function') await store.switchGameMode(m);
+    else store.currentGameMode = m;
+    log('tracker: mode → ' + m);
+    postProgress();
+  }
+
   let gen = 0; // scan generation: each scan's open() bumps it, which aborts older scans' opens
   let queue = Promise.resolve();
   const run = (f) => {
@@ -178,6 +190,7 @@
     },
     step: (id, name, up, targets) => run(() => step(id, name, up, targets)),
     fill: (id, name, targets, counts, firLeft, nonFirLeft) => run(() => fill(id, name, targets, counts, firLeft, nonFirLeft)),
+    mode: (m) => run(() => setMode(m)),
   };
 
   // Chad Fill button next to Smart Fill in the item popup. The popup's counters are component refs, so

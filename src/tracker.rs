@@ -57,6 +57,11 @@ pub fn fill_script(id: &str, name: &str, targets: &[Target], counts: &[u32], fir
     )
 }
 
+/// Switches the site to game mode `mode` (`Mode::key()`); a no-op when it already shows it.
+pub fn mode_script(mode: &str) -> String {
+    format!("window.__chad&&__chad.mode({})", js(mode))
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Message {
     Toast { title: String, body: String, warn: bool },
@@ -137,6 +142,11 @@ mod tests {
         assert_eq!(parse("\"nope\""), None);
         assert_eq!(parse("{}"), None);
         assert_eq!(parse(r#"{"toast":{"body":"B"}}"#), None);
+    }
+
+    #[test]
+    fn mode_script_passes_the_key() {
+        assert_eq!(mode_script("pve"), r#"window.__chad&&__chad.mode("pve")"#);
     }
 
     #[test]

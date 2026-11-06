@@ -46,6 +46,8 @@ pub enum Cmd {
         fir_left: u32,
         non_fir_left: u32,
     },
+    /// ChadScanner's game mode (`Mode::key()`) changed: switch the TarkovTracker window's site to it.
+    TrackerMode(String),
     /// Leaves the message loop (the app then exits).
     Quit,
 }
@@ -231,7 +233,7 @@ fn tray_icon() -> anyhow::Result<tray_icon::Icon> {
 }
 
 /// Runs the UI message loop on the calling thread until Quit.
-pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate::config::Paths) -> anyhow::Result<()> {
+pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate::config::Paths, mode: &str) -> anyhow::Result<()> {
     use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
     unsafe {
         let class = WNDCLASSW {
@@ -246,7 +248,7 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
         let unavailable = || actions.tracker_toast("TarkovTracker window unavailable", "WebView2 missing? see log.txt", true);
         // Built before the card window is published: WebView2 creation pumps messages, and anything
         // queued meanwhile is drained by the WM_APP posted below.
-        let mut tracker = match super::tracker::Tracker::create(paths, ui.tracker.clone()) {
+        let mut tracker = match super::tracker::Tracker::create(paths, ui.tracker.clone(), mode) {
             Ok(t) => Some(t),
             Err(e) => {
                 log::error!("TarkovTracker window: {e:#}");
@@ -328,6 +330,11 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                             None => unavailable(),
                             Some(t) => t.fill(&id, &name, &targets, &counts, fir_left, non_fir_left),
                         },
+                        Cmd::TrackerMode(m) => {
+                            if let Some(t) = tracker.as_mut() {
+                                t.mode(&m);
+                            }
+                        }
                         Cmd::UpdateLabel(t) => update.set_text(t),
                         Cmd::Quit => PostQuitMessage(0),
                     }
