@@ -112,6 +112,7 @@ narrows the map to your own extracts; tick off **Only my extracts** to see all o
 
 - A scan in raid shows the item page; when the card closes (cursor leaves it, or its timeout) the window returns to the map.
 - When the raid ends (or EFT quits) the window returns to TarkovTracker; scans outside a raid never switch back.
+- Press EFT's screenshot key (PrtScn by default) in raid and the map marks where you stand and which way you face, read from the screenshot's file name in `Documents\Escape from Tarkov\Screenshots`. The marker stays until the next screenshot or raid.
 - Map data: json.tarkov.dev (spawns, extracts) and the [tarkov.dev](https://github.com/the-hideout/tarkov-dev) map tiles, cached for 24 h.
   With no data yet the toast **Raid map unavailable** shows; for a location without a map, **No map for this location**.
 

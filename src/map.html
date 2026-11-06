@@ -70,6 +70,21 @@
     .ex.leaflet-tooltip-top::before {
       border-top-color: #444;
     }
+
+    .me-wrap {
+      background: none;
+      border: none;
+    }
+
+    .me {
+      width: 0;
+      height: 0;
+      border-left: 9px solid transparent;
+      border-right: 9px solid transparent;
+      border-bottom: 22px solid #ffd400;
+      filter: drop-shadow(0 0 2px #000);
+      transform-origin: 50% 50%;
+    }
   </style>
 </head>
 
@@ -88,7 +103,7 @@
       // Layer options live here, not in localStorage (this page has an opaque origin); they outlive every show().
       var opts = {spawns: true, extracts: true, mine: true};
       var COLORS = {pmc: '#00e599', shared: '#00e4e5', scav: '#ff7800'};
-      var map = null, view = null, mine = null, spawnLayer = null, extractLayer = null;
+      var map = null, view = null, mine = null, me = null, spawnLayer = null, extractLayer = null;
       var $ = function (id) {return document.getElementById(id);};
 
       // tarkov.dev's projection (src/pages/map/index.jsx).
@@ -143,6 +158,7 @@
         show: function (v) {
           view = v; mine = null;
           if (map) map.remove();
+          me = null;
           var c = v.config;
           var maxZoom = Math.max(7, c.maxZoom);
           map = L.map('map', {crs: getCRS(c), minZoom: c.minZoom, maxZoom: maxZoom, zoomSnap: 0.5, zoomControl: false, attributionControl: false});
@@ -168,6 +184,21 @@
           mine = names;
           renderExtracts();
           renderBar();
+        },
+        // A screenshot's position: an arrow at the spot, turned to face the way the player does. tarkov.dev's rule for the rotation.
+        here: function (p) {
+          if (!map || !view) return;
+          var r = view.config.coordinateRotation || 0;
+          if (r === 90 || r === 270) r += 180;
+          var icon = L.divIcon({
+            className: 'me-wrap',
+            html: '<div class="me" style="rotate:' + (p.yaw + r) + 'deg"></div>',
+            iconSize: [18, 22],
+            iconAnchor: [9, 11]
+          });
+          if (me) me.setLatLng(p.pos).setIcon(icon);
+          else me = L.marker(p.pos, {icon: icon, zIndexOffset: 1000, interactive: false}).addTo(map);
+          map.panTo(p.pos);
         }
       };
 

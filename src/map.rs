@@ -1,5 +1,6 @@
 //! The raid map page: `map.html` with the vendored Leaflet inlined, loaded as an in-memory page.
-//! `window.__map.show(view)` (a `maps::MapView` as JSON) and `window.__map.only(names)` drive it.
+//! `window.__map.show(view)` (a `maps::MapView` as JSON), `window.__map.only(names)` and `window.__map.here(position)`
+//! (a `screenshot::Position` as JSON) drive it.
 const PAGE: &str = include_str!("map.html");
 const LEAFLET_JS: &str = include_str!("../assets/leaflet/leaflet.js");
 const LEAFLET_CSS: &str = include_str!("../assets/leaflet/leaflet.css");

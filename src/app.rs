@@ -7,6 +7,7 @@ use crate::exfil;
 use crate::maps::{self, MapStore};
 use crate::needs;
 use crate::progress::{LocalSource, Notify, ObjectiveProgress, PartProgress, ProgressSource, TaskState, TrackerSource};
+use crate::screenshot;
 use crate::win::{self, hook::ScanRequest, ui};
 use chadvision::engine::Engine;
 use std::collections::HashMap;
@@ -716,6 +717,61 @@ impl App {
             }
             if tailer.state != before {
                 tailer.state.save(&state_path);
+            }
+        }
+    }
+
+    /// Marks the player on the raid map from the position EFT writes into each screenshot's file name.
+    pub fn screenshot_worker(self: Arc<Self>) {
+        use notify::{event::ModifyKind, EventKind, Watcher};
+        let Some(docs) = directories::UserDirs::new().and_then(|u| u.document_dir().map(|d| d.to_path_buf())) else {
+            log::warn!("screenshots: no Documents folder");
+            return;
+        };
+        let dir = docs.join("Escape from Tarkov").join("Screenshots");
+        let mut warned = false;
+        while !dir.is_dir() {
+            if !warned {
+                warned = true;
+                log::info!("EFT screenshots folder not found: {}", dir.display());
+            }
+            std::thread::sleep(Duration::from_secs(10));
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut watcher = match notify::recommended_watcher(move |e| {
+            let _ = tx.send(e);
+        }) {
+            Ok(w) => w,
+            Err(e) => {
+                log::warn!("screenshot watcher: {e}");
+                return;
+            }
+        };
+        if let Err(e) = watcher.watch(&dir, notify::RecursiveMode::NonRecursive) {
+            log::warn!("screenshot watcher: {e}");
+            return;
+        }
+        let mut last = String::new();
+        for event in rx {
+            let Ok(event) = event else { continue };
+            // EFT may write a temp name and rename it, so both creation and renames count.
+            if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))) {
+                continue;
+            }
+            for path in &event.paths {
+                let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+                let Some(p) = screenshot::parse(name) else { continue };
+                if self.raid_scene().is_none() {
+                    log::debug!("screenshot {name} ignored: no raid");
+                    continue;
+                }
+                // Create and rename can both fire for one file.
+                if name == last {
+                    continue;
+                }
+                last = name.to_owned();
+                log::info!("raid: position {:?} yaw {:.0}", p.pos, p.yaw);
+                self.ui.send(ui::Cmd::RaidPosition(serde_json::to_string(&p).expect("position serialises")));
             }
         }
     }

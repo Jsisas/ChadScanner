@@ -52,6 +52,8 @@ pub enum Cmd {
     RaidMap(String),
     /// Extract names the player's own exfil panel lists; the map narrows to them.
     RaidExtracts(Vec<String>),
+    /// The player's position from an EFT screenshot (`screenshot::Position` JSON); the map marks it.
+    RaidPosition(String),
     /// The raid is over: the window returns to TarkovTracker.
     RaidEnd,
     /// Leaves the message loop (the app then exits).
@@ -353,6 +355,11 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                         Cmd::RaidExtracts(names) => {
                             if let Some(t) = tracker.as_mut() {
                                 t.raid_extracts(&names);
+                            }
+                        }
+                        Cmd::RaidPosition(json) => {
+                            if let Some(t) = tracker.as_mut() {
+                                t.raid_position(&json);
                             }
                         }
                         Cmd::RaidEnd => {

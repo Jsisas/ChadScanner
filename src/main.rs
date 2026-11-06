@@ -12,6 +12,7 @@ mod map;
 mod maps;
 mod needs;
 mod progress;
+mod screenshot;
 mod secret;
 mod tracker;
 mod update;
@@ -116,6 +117,8 @@ fn run() -> anyhow::Result<()> {
     std::thread::Builder::new().name("scan".into()).spawn(move || worker.scan_worker(scan_rx))?;
     let logs = app.clone();
     std::thread::Builder::new().name("eft-logs".into()).spawn(move || logs.log_worker())?;
+    let shots = app.clone();
+    std::thread::Builder::new().name("screenshots".into()).spawn(move || shots.screenshot_worker())?;
     let watch = app.clone();
     std::thread::Builder::new().name("config".into()).spawn(move || watch.config_worker())?;
     let (step_tx, step_rx) = std::sync::mpsc::channel();

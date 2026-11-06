@@ -230,6 +230,15 @@ impl Tracker {
         self.eval_map(&format!("window.__map&&__map.only({json})"));
     }
 
+    /// The player's position from a screenshot: the map marks it, replacing an item page if one is up.
+    pub fn raid_position(&mut self, json: &str) {
+        if !self.in_raid {
+            return;
+        }
+        self.eval_map(&format!("window.__map&&__map.here({json})"));
+        self.set_view(View::Map);
+    }
+
     /// The raid is over: back to TarkovTracker.
     pub fn raid_end(&mut self) {
         self.in_raid = false;
