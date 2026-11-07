@@ -64,6 +64,18 @@ pub fn mode_script(mode: &str) -> String {
     format!("window.__chad&&__chad.mode({})", js(mode))
 }
 
+/// Raises trader loyalty levels from `(trader id, name, level)`.
+pub fn traders_script(list: &[(String, String, u8)]) -> String {
+    let items: Vec<_> = list.iter().map(|(id, name, level)| serde_json::json!({"id": id, "name": name, "level": level})).collect();
+    format!("window.__chad&&__chad.traders({})", serde_json::Value::Array(items))
+}
+
+/// Raises hideout station levels from `(station id, name, level)`.
+pub fn hideout_script(list: &[(String, String, u8)]) -> String {
+    let items: Vec<_> = list.iter().map(|(id, name, level)| serde_json::json!({"id": id, "name": name, "level": level})).collect();
+    format!("window.__chad&&__chad.hideout({})", serde_json::Value::Array(items))
+}
+
 /// Opens the tarkovtracker.org map of the tarkov.dev map `map_id` for a raid; `rotation` is its `coordinateRotation`.
 pub fn raid_script(map_id: &str, rotation: f64) -> String {
     format!("window.__chad&&__chad.raid({},{rotation})", js(map_id))
@@ -99,8 +111,14 @@ pub enum Message {
     Log(String),
     /// Chad Fill clicked in the item popup for item `id`: what the popup showed.
     Fill { id: String, popup: Popup },
-    /// The site's own progress for its current game mode (`pvp`/`pve`/`seasonal`), by objective and hideout-part id.
-    Progress { mode: String, objectives: HashMap<String, ObjectiveProgress>, parts: HashMap<String, PartProgress> },
+    /// The site's own progress for its current game mode (`pvp`/`pve`/`seasonal`), by objective, hideout-part and hideout-module id.
+    Progress {
+        mode: String,
+        objectives: HashMap<String, ObjectiveProgress>,
+        parts: HashMap<String, PartProgress>,
+        /// hideout module id → complete
+        modules: HashMap<String, bool>,
+    },
 }
 
 /// `{id: {count, complete}}` → `id → make(complete, count)`; missing fields read as 0 / false, a non-object as empty.
@@ -129,7 +147,7 @@ fn popup_row(v: &serde_json::Value) -> Option<PopupRow> {
     })
 }
 
-/// A page message: `{"toast":{"title","body","warn"}}`, `{"progress":{"mode","objectives","parts"}}`,
+/// A page message: `{"toast":{"title","body","warn"}}`, `{"progress":{"mode","objectives","parts","modules"}}`,
 /// `{"fill":{"id","fir","nonFir","rows":[{"kind","group","fir","count"}]}}` or `{"log":"…"}`; anything else → None.
 pub fn parse(msg: &str) -> Option<Message> {
     let v: serde_json::Value = serde_json::from_str(msg).ok()?;
@@ -145,6 +163,7 @@ pub fn parse(msg: &str) -> Option<Message> {
             mode: p.get("mode")?.as_str()?.to_owned(),
             objectives: counts(p.get("objectives"), |complete, count| ObjectiveProgress { complete, count, invalid: false }),
             parts: counts(p.get("parts"), |complete, count| PartProgress { complete, count }),
+            modules: counts(p.get("modules"), |complete, _| complete),
         });
     }
     if let Some(f) = v.get("fill") {
@@ -181,6 +200,18 @@ mod tests {
     }
 
     #[test]
+    fn menu_scripts_carry_ids_and_levels() {
+        assert_eq!(
+            traders_script(&[("t1".into(), "Prapor".into(), 2)]),
+            r#"window.__chad&&__chad.traders([{"id":"t1","level":2,"name":"Prapor"}])"#
+        );
+        assert_eq!(
+            hideout_script(&[("s1".into(), "Vents".into(), 2)]),
+            r#"window.__chad&&__chad.hideout([{"id":"s1","level":2,"name":"Vents"}])"#
+        );
+    }
+
+    #[test]
     fn raid_extracts_script_passes_the_side() {
         assert_eq!(
             raid_extracts_script(&["A".into()], Some("pmc")),
@@ -191,11 +222,15 @@ mod tests {
 
     #[test]
     fn parses_progress() {
-        let m = parse(r#"{"progress":{"mode":"pvp","objectives":{"o":{"count":2,"complete":true}},"parts":{"p":{"count":1}}}}"#);
-        let Some(Message::Progress { mode, objectives, parts }) = m else { panic!("not a progress message: {m:?}") };
+        let m = parse(
+            r#"{"progress":{"mode":"pvp","objectives":{"o":{"count":2,"complete":true}},"parts":{"p":{"count":1}},"modules":{"s-1":{"complete":true},"s-2":{}}}}"#,
+        );
+        let Some(Message::Progress { mode, objectives, parts, modules }) = m else { panic!("not a progress message: {m:?}") };
         assert_eq!(mode, "pvp");
         assert_eq!(objectives["o"], ObjectiveProgress { complete: true, count: 2, invalid: false });
         assert_eq!(parts["p"], PartProgress { complete: false, count: 1 });
+        assert!(modules["s-1"]);
+        assert!(!modules["s-2"]);
         assert_eq!(parse(r#"{"progress":{"objectives":{}}}"#), None);
         assert!(matches!(parse(r#"{"progress":{"mode":"pve"}}"#), Some(Message::Progress { objectives, .. }) if objectives.is_empty()));
     }

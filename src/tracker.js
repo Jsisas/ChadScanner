@@ -350,7 +350,9 @@
     if (!s) return log('tracker: no progress store');
     const pick = (m) =>
       Object.fromEntries(Object.entries(m || {}).map(([id, e]) => [id, { count: Number(e?.count) || 0, complete: !!e?.complete }]));
-    post({ progress: { mode: s.mode, objectives: pick(s.d.taskObjectives), parts: pick(s.d.hideoutParts) } });
+    post({
+      progress: { mode: s.mode, objectives: pick(s.d.taskObjectives), parts: pick(s.d.hideoutParts), modules: pick(s.d.hideoutModules) },
+    });
   }
 
   // Switches the site to game mode `m` (`pvp`/`pve`/`seasonal`) through its own store action, which also reloads
@@ -362,6 +364,58 @@
     if (typeof store.switchGameMode === 'function') await store.switchGameMode(m);
     else store.currentGameMode = m;
     log('tracker: mode → ' + m);
+    postProgress();
+  }
+
+  // Menu levels ChadScanner read off EFT's screen, written into the site's progress store.
+  // `list` is [{id, name, level}] (trader ids); only higher levels are written: a misread or a real loyalty drop
+  // must never lower a trader, because lowering makes the site un-complete the stations that depend on it.
+  async function setTraders(list) {
+    const store = await until(() => tarkovStore() && tarkovState() && tarkovStore(), 10000, null);
+    if (!store) return log('tracker: no progress store for trader levels');
+    const changes = [];
+    for (const t of list) {
+      if (store.getTraderLevel(t.id) >= t.level) continue;
+      store.setTraderLevel(t.id, t.level);
+      changes.push(t.name + ' LL' + t.level);
+    }
+    if (!changes.length) return;
+    toast('Traders', changes.join(', '), false);
+    log('tracker: traders ' + changes.join(', '));
+    postProgress();
+  }
+
+  // `list` is [{id, name, level}] (station ids): modules 1..level are completed, never un-completed (EFT never
+  // un-builds a station). The site's prerequisite check runs once afterwards; levels it rejects are reported.
+  async function setHideout(list) {
+    const store = await until(() => tarkovStore() && tarkovState() && tarkovStore(), 10000, null);
+    if (!store) return log('tracker: no progress store for hideout levels');
+    const written = [];
+    for (const s of list) {
+      let wrote = false;
+      for (let l = 1; l <= s.level; l++) {
+        const mid = s.id + '-' + l;
+        if (store.isHideoutModuleComplete(mid)) continue;
+        store.setHideoutModuleComplete(mid);
+        wrote = true;
+      }
+      if (wrote) written.push(s);
+    }
+    if (!written.length) return;
+    if (typeof store.enforceHideoutPrereqsNow === 'function') store.enforceHideoutPrereqsNow();
+    const changes = [];
+    const refused = [];
+    for (const s of written) {
+      (store.isHideoutModuleComplete(s.id + '-' + s.level) ? changes : refused).push(s.name + ' ' + s.level);
+    }
+    if (changes.length) {
+      toast('Hideout', changes.join(', '), false);
+      log('tracker: hideout ' + changes.join(', '));
+    }
+    if (refused.length) {
+      toast('Hideout', 'TarkovTracker refused ' + refused.join(', ') + ': unmet trader, skill or station requirement', true);
+      log('tracker: hideout refused ' + refused.join(', '));
+    }
     postProgress();
   }
 
@@ -379,6 +433,8 @@
     step: (id, name, up, targets) => run(() => step(id, name, up, targets)),
     fill: (id, name, targets, counts, firLeft, nonFirLeft) => run(() => fill(id, name, targets, counts, firLeft, nonFirLeft)),
     mode: (m) => run(() => setMode(m)),
+    traders: (l) => run(() => setTraders(l)),
+    hideout: (l) => run(() => setHideout(l)),
   };
 
   // Navigates to the raid's map view (`/tasks/maps?map=<id>`) unless it is already showing.

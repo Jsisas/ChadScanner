@@ -47,6 +47,19 @@ struct Raid {
     in_raid: bool,
 }
 
+/// What the menu reader has seen on the screen that is open; cleared whenever it has nothing to read, except the tab
+/// cache, which only leaving the menus (raid, EFT not focused) clears.
+#[derive(Default)]
+struct MenuState {
+    /// Active tab's pixel range and the screen its label named (OCR runs only when the range changes).
+    tab: Option<((u32, u32), Option<crate::screens::Screen>)>,
+    screen: Option<crate::screens::Screen>,
+    /// Id → level from the previous read after this click, and those two consecutive reads after a click agreed on
+    /// (each is sent once, when first confirmed).
+    previous: HashMap<String, u8>,
+    confirmed: HashMap<String, u8>,
+}
+
 pub struct App {
     pub paths: Paths,
     pub cfg: RwLock<Config>,
@@ -885,6 +898,151 @@ impl App {
         }
     }
 
+    // ------------------------------------------------------------ menu levels
+
+    /// Outside a raid, reads trader loyalty levels off EFT's Traders screen and the level of the station whose
+    /// detail panel is open on its Hideout screen, right after each left click, and sends them to the TarkovTracker window.
+    pub fn menu_worker(self: Arc<Self>, clicks: Receiver<()>) {
+        use std::sync::mpsc::RecvTimeoutError;
+        /// Gap between reads after a left click, and how many reads at most (the view rolls in for an unknown time).
+        const GAP: Duration = Duration::from_millis(250);
+        const MAX_READS: usize = 8;
+        let mut state = MenuState::default();
+        while clicks.recv().is_ok() {
+            // Another click during the reads restarts them: the screen may have changed again.
+            'burst: loop {
+                state.previous.clear();
+                for _ in 0..MAX_READS {
+                    match clicks.recv_timeout(GAP) {
+                        Ok(()) => continue 'burst,
+                        Err(RecvTimeoutError::Disconnected) => return,
+                        Err(RecvTimeoutError::Timeout) => {}
+                    }
+                    match self.menu_poll(&mut state) {
+                        None => {
+                            state = MenuState { tab: state.tab.take(), ..MenuState::default() };
+                            break 'burst;
+                        }
+                        Some(true) => break 'burst,
+                        Some(false) => {}
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    /// One read; `Some(true)` once it matched the previous read (the screen has settled), `None` when there is nothing
+    /// to read (in a raid, EFT not focused, no menu screen, not ready yet).
+    fn menu_poll(&self, st: &mut MenuState) -> Option<bool> {
+        use crate::screens::{self, Frame, Screen};
+        if self.raid.lock().unwrap().in_raid || !win::eft_in_foreground() {
+            st.tab = None;
+            return None;
+        }
+        let engine = self.engine.get()?;
+        let cat = self.store.read().unwrap().get()?;
+        let (cx, cy) = win::foreground_center();
+        let (l, t, r, b) = win::monitor_rect(cx, cy);
+        let frame = Frame::for_monitor((r - l) as u32, (b - t) as u32);
+        let grab = |region| {
+            let (x, y, w, h) = frame.rect(region);
+            win::capture::region(l + x, t + y, w, h).map_err(|e| log::warn!("menu capture: {e:#}")).ok()
+        };
+        let nav = grab(screens::NAV)?;
+        let range = screens::active_tab(&nav, frame.scale)?;
+        let screen = match st.tab {
+            Some((cached, screen)) if cached == range => screen,
+            _ => {
+                let screen = screens::tab_crop(&nav, frame.scale, range).and_then(|c| screens::screen_of(&engine.read_line(&c)));
+                st.tab = Some((range, screen));
+                screen
+            }
+        }?;
+        if st.screen != Some(screen) {
+            st.screen = Some(screen);
+            st.previous.clear();
+            st.confirmed.clear();
+        }
+        let best = |text: &str, names: &mut dyn Iterator<Item = (&String, &str)>| {
+            names
+                .map(|(id, n)| (id, chadvision::lexicon::score(text, n)))
+                .filter(|(_, s)| *s >= screens::MATCH)
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(id, _)| id.clone())
+        };
+        let mut current: HashMap<String, u8> = HashMap::new();
+        let mut dropped: Vec<String> = Vec::new();
+        let mut put = |id: String, level: u8| {
+            if current.insert(id.clone(), level).is_some() {
+                dropped.push(id);
+            }
+        };
+        match screen {
+            Screen::Traders => {
+                let img = grab(screens::TRADERS)?;
+                for read in screens::traders(&img, frame.scale, |l| engine.read_line(l)) {
+                    if let Some(id) = best(&read.name, &mut cat.traders.iter().map(|(id, n)| (id, n.as_str()))) {
+                        put(id, read.level);
+                    }
+                }
+            }
+            Screen::Hideout => {
+                let img = grab(screens::DETAIL)?;
+                if let Some(read) = screens::detail(&img, frame.scale, |l| engine.read_line(l)) {
+                    if let Some(id) = best(&read.name, &mut cat.stations.iter().map(|s| (&s.id, s.name.as_str()))) {
+                        if cat.stations.iter().any(|s| s.id == id && read.level as usize <= s.levels.len()) {
+                            put(id, read.level);
+                        }
+                    }
+                }
+            }
+        }
+        for id in dropped {
+            current.remove(&id);
+        }
+        // A level counts once two consecutive reads after a click agree (the view has finished rolling in); levels accumulate while the screen stays open.
+        let mut fresh: Vec<(String, u8)> = Vec::new();
+        for (id, level) in &current {
+            if st.previous.get(id) == Some(level) && st.confirmed.get(id) != Some(level) {
+                st.confirmed.insert(id.clone(), *level);
+                fresh.push((id.clone(), *level));
+            }
+        }
+        let settled = !current.is_empty() && current == st.previous;
+        st.previous = current;
+        if fresh.is_empty() {
+            return Some(settled);
+        }
+        fresh.sort();
+        match screen {
+            Screen::Traders => {
+                let list: Vec<(String, String, u8)> =
+                    fresh.iter().filter_map(|(id, l)| Some((id.clone(), cat.traders.get(id)?.clone(), *l))).collect();
+                if list.is_empty() {
+                    return Some(settled);
+                }
+                log::info!("menus: traders {:?}", list.iter().map(|(_, n, l)| format!("{n} {l}")).collect::<Vec<_>>());
+                self.ui.send(ui::Cmd::MenuTraders(list));
+            }
+            Screen::Hideout => {
+                let list: Vec<(String, String, u8)> = fresh
+                    .iter()
+                    .filter_map(|(id, l)| {
+                        let s = cat.stations.iter().find(|s| &s.id == id)?;
+                        Some((s.id.clone(), s.name.clone(), *l))
+                    })
+                    .collect();
+                if list.is_empty() {
+                    return Some(settled);
+                }
+                log::info!("menus: hideout {:?}", list.iter().map(|(_, n, l)| format!("{n} {l}")).collect::<Vec<_>>());
+                self.ui.send(ui::Cmd::MenuHideout(list));
+            }
+        }
+        Some(settled)
+    }
+
     // ------------------------------------------------------------ config watch
 
     pub fn config_worker(self: Arc<Self>) {
@@ -1043,13 +1201,14 @@ impl ui::TrayActions for Arc<App> {
         mode: &str,
         objectives: HashMap<String, ObjectiveProgress>,
         parts: HashMap<String, PartProgress>,
+        modules: HashMap<String, bool>,
     ) {
         let active = self.cfg.read().unwrap().mode;
         if mode != active.key() {
             log::info!("tracker: progress for {mode} ignored (ChadScanner is on {})", active.key());
             return;
         }
-        self.progress().observe(&objectives, &parts);
+        self.progress().observe(&objectives, &parts, &modules);
         self.redraw_last_card();
     }
 

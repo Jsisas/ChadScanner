@@ -70,7 +70,13 @@ pub trait ProgressSource: Send + Sync {
     /// Re-reads remote progress when the snapshot is older than a few seconds; called before a scan.
     fn refresh_if_stale(&self) {}
     /// Merges progress observed outside ChadScanner (the TarkovTracker window) into the shown snapshot, without writing.
-    fn observe(&self, _objectives: &HashMap<String, ObjectiveProgress>, _parts: &HashMap<String, PartProgress>) {}
+    fn observe(
+        &self,
+        _objectives: &HashMap<String, ObjectiveProgress>,
+        _parts: &HashMap<String, PartProgress>,
+        _modules: &HashMap<String, bool>,
+    ) {
+    }
 }
 
 /// Toast sink: (title, body).
@@ -714,13 +720,25 @@ impl ProgressSource for TrackerSource {
         false
     }
 
-    fn observe(&self, objectives: &HashMap<String, ObjectiveProgress>, parts: &HashMap<String, PartProgress>) {
+    fn observe(
+        &self,
+        objectives: &HashMap<String, ObjectiveProgress>,
+        parts: &HashMap<String, PartProgress>,
+        modules: &HashMap<String, bool>,
+    ) {
         self.apply(|p, _| {
             for (id, o) in objectives {
                 let invalid = p.objectives.get(id).is_some_and(|old| old.invalid);
                 p.objectives.insert(id.clone(), ObjectiveProgress { invalid, ..*o });
             }
             p.hideout_parts.extend(parts.iter().map(|(id, v)| (id.clone(), *v)));
+            for (id, built) in modules {
+                if *built {
+                    p.hideout_modules.insert(id.clone());
+                } else {
+                    p.hideout_modules.remove(id);
+                }
+            }
         });
     }
 

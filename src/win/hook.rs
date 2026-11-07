@@ -1,4 +1,4 @@
-//! `WH_MOUSE_LL` hook: emits a scan request when the configured hotkey is released.
+//! `WH_MOUSE_LL` hook: emits a scan request when the configured hotkey is released, and a click signal on every left-button release (menu reading).
 //! `WH_KEYBOARD_LL` hook: emits a progress step when Arrow Up / Down is released.
 //! Both also watch for EFT's show-exits key (recorded, see `exfil_opened_age`). Neither swallows input.
 use crate::config::Hotkey;
@@ -31,6 +31,7 @@ pub enum Step {
 
 static TX: OnceLock<Sender<ScanRequest>> = OnceLock::new();
 static STEP_TX: OnceLock<Sender<Step>> = OnceLock::new();
+static CLICK_TX: OnceLock<Sender<()>> = OnceLock::new();
 static HOTKEY: AtomicU8 = AtomicU8::new(0);
 static STEP_KEYS: AtomicBool = AtomicBool::new(false);
 static EXFIL_KEY: OnceLock<eftkeys::ExfilKey> = OnceLock::new();
@@ -112,6 +113,11 @@ unsafe extern "system" fn proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
             },
             _ => {}
         }
+        if msg == WM_LBUTTONUP {
+            if let Some(tx) = CLICK_TX.get() {
+                let _ = tx.send(());
+            }
+        }
         let fire = match hotkey() {
             Hotkey::ShiftLeft => msg == WM_LBUTTONUP && down(VK_SHIFT.0),
             Hotkey::AltLeft => msg == WM_LBUTTONUP && down(VK_MENU.0),
@@ -163,13 +169,14 @@ unsafe extern "system" fn key_proc(code: i32, wparam: WPARAM, lparam: LPARAM) ->
 }
 
 /// Installs both hooks on one thread with a message loop (required for LL hooks).
-pub fn start(tx: Sender<ScanRequest>, step_tx: Sender<Step>, hotkey: Hotkey, progress_keys: bool, exfil_key: eftkeys::ExfilKey) {
+pub fn start(tx: Sender<ScanRequest>, step_tx: Sender<Step>, click_tx: Sender<()>, hotkey: Hotkey, progress_keys: bool, exfil_key: eftkeys::ExfilKey) {
     set_hotkey(hotkey);
     set_progress_keys(progress_keys);
     let _ = BASE.set(Instant::now());
     let _ = EXFIL_KEY.set(exfil_key);
     let _ = TX.set(tx);
     let _ = STEP_TX.set(step_tx);
+    let _ = CLICK_TX.set(click_tx);
     std::thread::Builder::new()
         .name("input-hook".into())
         .spawn(|| unsafe {

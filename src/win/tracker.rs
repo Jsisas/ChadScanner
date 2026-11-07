@@ -243,6 +243,18 @@ impl Tracker {
         self.eval(&tracker::fill_script(id, name, targets, counts, fir_left, non_fir_left));
     }
 
+    /// Trader levels read off the Traders screen.
+    pub fn traders(&self, list: &[(String, String, u8)]) {
+        self.eval(&tracker::mode_script(&self.mode));
+        self.eval(&tracker::traders_script(list));
+    }
+
+    /// Station levels read off the Hideout screen.
+    pub fn hideout(&self, list: &[(String, String, u8)]) {
+        self.eval(&tracker::mode_script(&self.mode));
+        self.eval(&tracker::hideout_script(list));
+    }
+
     /// Messages the page posted since the last call (the page's ready signal is handled here).
     pub fn drain(&self) -> Vec<String> {
         let mut all = std::mem::take(&mut *self.messages.borrow_mut());

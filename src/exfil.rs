@@ -14,7 +14,7 @@ static LINE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^\s*EX(?:[I1l]T|F[I1l]L)\s*0?\d{1,2}\s+(?P<name>.+?)\s*$").unwrap());
 static TIMER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+\d{1,2}:\d{2}(:\d{2})?$").unwrap());
 
-fn is_text(p: &image::Rgb<u8>) -> bool {
+pub(crate) fn is_text(p: &image::Rgb<u8>) -> bool {
     let [r, g, b] = [p[0] as u32, p[1] as u32, p[2] as u32];
     let luma = (299 * r + 587 * g + 114 * b) / 1000;
     let sat = r.max(g).max(b) as i32 - r.min(g).min(b) as i32;
@@ -22,7 +22,7 @@ fn is_text(p: &image::Rgb<u8>) -> bool {
 }
 
 /// Header pixels are green: `g` well above both `r` and `b` (the fixture's is `(108,159,5)`).
-fn is_header(p: &image::Rgb<u8>) -> bool {
+pub(crate) fn is_header(p: &image::Rgb<u8>) -> bool {
     let [r, g, b] = [p[0] as i32, p[1] as i32, p[2] as i32];
     g >= 120 && g - b >= 80 && g - r >= 20
 }

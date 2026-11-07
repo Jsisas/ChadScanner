@@ -48,6 +48,10 @@ pub enum Cmd {
     },
     /// ChadScanner's game mode (`Mode::key()`) changed: switch the TarkovTracker window's site to it.
     TrackerMode(String),
+    /// Trader loyalty levels read off EFT's Traders screen as `(trader id, name, level)`; the site's store gets them.
+    MenuTraders(Vec<(String, String, u8)>),
+    /// Hideout station levels read off EFT's Hideout screen as `(station id, name, level)`.
+    MenuHideout(Vec<(String, String, u8)>),
     /// A raid started: open tarkovtracker.org's map of this location (tarkov.dev map id) in the ChadScanner window.
     RaidMap { id: String, rotation: f64 },
     /// Extract names the player's own exfil panel lists and the raid side (`Side::key()`) once known; the map narrows to them.
@@ -107,6 +111,7 @@ pub trait TrayActions {
         mode: &str,
         objectives: std::collections::HashMap<String, crate::progress::ObjectiveProgress>,
         parts: std::collections::HashMap<String, crate::progress::PartProgress>,
+        modules: std::collections::HashMap<String, bool>,
     );
 }
 
@@ -347,6 +352,16 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                                 t.mode(&m);
                             }
                         }
+                        Cmd::MenuTraders(l) => {
+                            if let Some(t) = tracker.as_mut() {
+                                t.traders(&l);
+                            }
+                        }
+                        Cmd::MenuHideout(l) => {
+                            if let Some(t) = tracker.as_mut() {
+                                t.hideout(&l);
+                            }
+                        }
                         Cmd::RaidMap { id, rotation } => {
                             if let Some(t) = tracker.as_mut() {
                                 t.raid_map(&id, rotation);
@@ -381,8 +396,8 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                             Some(crate::tracker::Message::Toast { title, body, warn }) => actions.tracker_toast(&title, &body, warn),
                             Some(crate::tracker::Message::Log(s)) => log::info!("{s}"),
                             Some(crate::tracker::Message::Fill { id, popup }) => actions.tracker_fill(&id, popup),
-                            Some(crate::tracker::Message::Progress { mode, objectives, parts }) => {
-                                actions.tracker_progress(&mode, objectives, parts)
+                            Some(crate::tracker::Message::Progress { mode, objectives, parts, modules }) => {
+                                actions.tracker_progress(&mode, objectives, parts, modules)
                             }
                             None => log::warn!("tracker: unknown message {m}"),
                         }

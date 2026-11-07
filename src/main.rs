@@ -12,6 +12,7 @@ mod exfil;
 mod maps;
 mod needs;
 mod progress;
+mod screens;
 mod screenshot;
 mod secret;
 mod tracker;
@@ -119,6 +120,9 @@ fn run() -> anyhow::Result<()> {
     std::thread::Builder::new().name("eft-logs".into()).spawn(move || logs.log_worker())?;
     let shots = app.clone();
     std::thread::Builder::new().name("screenshots".into()).spawn(move || shots.screenshot_worker())?;
+    let (click_tx, click_rx) = std::sync::mpsc::channel();
+    let menus = app.clone();
+    std::thread::Builder::new().name("menus".into()).spawn(move || menus.menu_worker(click_rx))?;
     let watch = app.clone();
     std::thread::Builder::new().name("config".into()).spawn(move || watch.config_worker())?;
     let (step_tx, step_rx) = std::sync::mpsc::channel();
@@ -128,7 +132,7 @@ fn run() -> anyhow::Result<()> {
     std::thread::Builder::new().name("update".into()).spawn(move || upd.update_worker())?;
     let exfil_key = eftkeys::load();
     log::info!("exfil key: {}", exfil_key.label);
-    win::hook::start(scan_tx, step_tx, cfg.hotkey, cfg.progress_keys, exfil_key);
+    win::hook::start(scan_tx, step_tx, click_tx, cfg.hotkey, cfg.progress_keys, exfil_key);
 
     let actions: Arc<app::App> = app;
     win::ui::run(&ui, ui_rx, &actions, &paths, cfg.mode.key())?;
