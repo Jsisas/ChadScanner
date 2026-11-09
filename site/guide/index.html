@@ -91,6 +91,8 @@
         <li><a href="#keys">Hand in quest items with Arrow Up</a></li>
         <li><a href="#progress">Progress: on this PC or TarkovTracker</a></li>
         <li><a href="#tracker">Built-in TarkovTracker window</a></li>
+        <li><a href="#levels">Trader and hideout levels</a></li>
+        <li><a href="#raidmap">Raid map</a></li>
         <li><a href="#settings">Settings</a></li>
         <li><a href="#updates">Updates</a></li>
         <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -120,17 +122,17 @@
 
       <h2 id="card">How to read the item card</h2>
       <p>Example card for the item NaCl:</p>
-      <pre>NaCl                                   27× needed
-QUESTS
-4×  Pets Won't Need It                  FIR · now
-3×  First in Line            FIR · trader dialogue
-3×  Thirsty - Secrets                FIR · 4 quests
-HIDEOUT
-6×  Medstation 2                              now
-10× Medstation 3                       3 upgrades
-──────────────────────────────────────────────────
-Flea 94 666 ₽                   Therapist 4 339 ₽
-Barters 3 · Crafts 5</pre>
+      <pre>NaCl 27× needed
+        QUESTS
+        4× Pets Won't Need It FIR · now
+        3× First in Line FIR · trader dialogue
+        3× Thirsty - Secrets FIR · 4 quests
+        HIDEOUT
+        6× Medstation 2 now
+        10× Medstation 3 3 upgrades
+        ──────────────────────────────────────────────────
+        Flea 94 666 ₽ Therapist 4 339 ₽
+        Barters 3 · Crafts 5</pre>
       <p>The border colour tells you what to do with the item:</p>
       <div class="table-wrap">
         <table>
@@ -224,6 +226,42 @@ Barters 3 · Crafts 5</pre>
           read confirms it.</li>
       </ul>
 
+      <h2 id="levels">Trader and hideout levels from EFT's menus</h2>
+      <p>Outside a raid, with EFT focused, ChadScanner reads EFT's own menus after every left click and writes the
+        result into the TarkovTracker window:</p>
+      <ul>
+        <li><b>Traders</b> screen: each unlocked trader's loyalty level (roman-numeral badge; crown = 4).</li>
+        <li><b>Hideout</b> screen: the level of the station whose detail panel is open.</li>
+        <li>Levels only go up. A misread or a real loyalty drop never lowers a trader. Stations are never
+          un-built.</li>
+        <li>TarkovTracker checks hideout prerequisites. Levels it rejects show the toast <b>TarkovTracker refused
+            …: unmet trader, skill or station requirement</b>.</li>
+        <li>Needs the TarkovTracker window (it can be hidden, but not unopened), EFT's menu in English, and
+          Borderless.</li>
+      </ul>
+
+      <h2 id="raidmap">Raid map</h2>
+      <p>EFT's logs tell ChadScanner when a raid starts and ends. At spawn the ChadScanner window opens
+        tarkovtracker.org's own map of the location (the same one that shows your quest objectives); it is shown
+        without taking focus from EFT, even if you had closed it. ChadScanner reads the extraction list EFT shows at
+        spawn (<code>EXIT01 …</code>, EFT focused, Borderless) once per raid, and again whenever you press EFT's
+        show-exits key (read from EFT's <code>Control.ini</code>), and hides every extract that is not on your list.
+        TarkovTracker's own PMC / Scav / spawn toggles still apply.</p>
+      <ul>
+        <li>A scan in raid shows the item page; when the card closes (cursor leaves it, or its timeout) the window
+          returns to the map.</li>
+        <li>When the raid ends (or EFT quits) the window returns to the page it showed before the raid; scans outside
+          a raid never switch back.</li>
+        <li>Press EFT's screenshot key (PrtScn by default) in raid and the map draws a yellow arrow where you stand
+          and which way you face, read from the screenshot's file name in <code>Documents\Escape from
+            Tarkov\Screenshots</code>. The map pans only when the arrow is off-screen. The screenshot file is then
+          deleted; screenshots without coordinates (menus) and ones taken while ChadScanner saw no raid are kept.
+          The arrow stays until the next screenshot or raid end.</li>
+        <li>Map data: json.tarkov.dev (map ids, extract names) and tarkov.dev's <code>maps.json</code> (map
+          rotation), cached for 24 h. With no data yet the toast <b>Raid map unavailable</b> shows; for a location
+          without a map, <b>No map for this location</b>.</li>
+      </ul>
+
       <h2 id="settings">Settings</h2>
       <p>Right-click the tray icon → Settings. Changes are saved and applied immediately.</p>
       <div class="table-wrap">
@@ -308,7 +346,8 @@ Barters 3 · Crafts 5</pre>
               <td><code>config.json</code>, <code>progress.json</code>, <code>pending.json</code> (TarkovTracker writes
                 waiting for retry), <code>logstate.json</code> (EFT log read position), <code>tracker-window.json</code>
                 (TarkovTracker window position), <code>webview\</code> (its browser profile: keeps the login),
-                <code>cache\</code> (tarkov.dev data), <code>reports\</code>, <code>log.txt</code></td>
+                <code>cache\</code> (tarkov.dev data), <code>reports\</code>, <code>log.txt</code>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -322,6 +361,9 @@ Barters 3 · Crafts 5</pre>
           json.tarkov.dev lacks them.</li>
         <li>Progress: the <a href="https://tarkovtracker.org">TarkovTracker</a> API or the local file.</li>
         <li>Quest events and game mode: EFT's own log files.</li>
+        <li>Trader and hideout levels: EFT's Traders and Hideout screens (OCR).</li>
+        <li>Raid maps: json.tarkov.dev (<code>maps</code>) and tarkov.dev's <code>maps.json</code> map configuration;
+          the map itself is tarkovtracker.org's.</li>
       </ul>
 
       <p><a class="btn btn-primary"

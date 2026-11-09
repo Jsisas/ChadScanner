@@ -5,6 +5,8 @@
 - Download: one zip, `chadscanner-win-x64.zip`, only from GitHub Releases. Extract (e.g. to `C:\`), run `chadscanner.exe`, set EFT to Borderless.
 - Data: items, quests, hideout, prices, barters and crafts from tarkov.dev, refreshed every 10 minutes.
 - Progress: local file (TarkovTracker backup format) or TarkovTracker.org sync via API token per game mode; built-in TarkovTracker window.
+- Raid map: at raid start the built-in TarkovTracker window shows the location map with only the player's own extracts (read by OCR from EFT's exfil panel); PrtScn marks the player's position.
+- Trader loyalty and hideout station levels are read from EFT's Traders/Hideout screens and written to TarkovTracker (raise-only).
 - PvP and PvE: switched automatically from EFT's log files.
 - Hotkeys: Arrow Up hands one item in to the next open objective, Arrow Down undoes; scan button configurable (Shift + Left, Alt + Left, Middle, Mouse 4, Mouse 5).
 - Updates itself from GitHub Releases (checked at start and every 6 hours).
@@ -12,7 +14,7 @@
 
 ## Docs
 
-- [Guide](https://chadscanner.sisas.ee/guide/): install, reading the card, hotkeys, TarkovTracker sync, troubleshooting, file locations
+- [Guide](https://chadscanner.sisas.ee/guide/): install, reading the card, hotkeys, TarkovTracker sync, troubleshooting, file locations, raid map, trader/hideout levels
 - [README](https://raw.githubusercontent.com/Jsisas/ChadScanner/master/README.md): full reference including build instructions
 
 ## Links

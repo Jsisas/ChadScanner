@@ -102,9 +102,19 @@ to English.
   With the window closed the keys work as described above, for quest objectives only.
 - The card redraws after every press from the window's own progress (same game mode only); the next API read confirms it.
 
+## Trader and hideout levels
+
+Outside a raid, with EFT focused, ChadScanner reads EFT's own menus after every left click and writes the result into the TarkovTracker window:
+
+- **Traders** screen: each unlocked trader's loyalty level (roman-numeral badge; crown = 4).
+- **Hideout** screen: the level of the station whose detail panel is open.
+- Levels only go up. A misread or a real loyalty drop never lowers a trader. Stations are never un-built.
+- TarkovTracker checks hideout prerequisites. Levels it rejects show the toast **TarkovTracker refused …: unmet trader, skill or station requirement**.
+- Needs the TarkovTracker window (it can be hidden, but not unopened), EFT's menu in English, and Borderless.
+
 ## Raid map
 
-EFT's logs tell ChadScanner when a raid starts and ends. At spawn the ChadScanner window opens [tarkovtracker.org](https://tarkovtracker.org)'s own map of the location (the same one that shows your quest objectives); it is shown without taking focus from EFT, even if you had closed it. ChadScanner also reads the extraction list EFT shows at spawn (`EXIT01 …`, EFT focused, Borderless) and hides every extract that is not on your list. TarkovTracker's own PMC / Scav / spawn toggles still apply.
+EFT's logs tell ChadScanner when a raid starts and ends. At spawn the ChadScanner window opens [tarkovtracker.org](https://tarkovtracker.org)'s own map of the location (the same one that shows your quest objectives); it is shown without taking focus from EFT, even if you had closed it. ChadScanner reads the extraction list EFT shows at spawn (`EXIT01 …`, EFT focused, Borderless) once per raid, and again whenever you press EFT's show-exits key (read from EFT's `Control.ini`), and hides every extract that is not on your list. TarkovTracker's own PMC / Scav / spawn toggles still apply.
 
 - A scan in raid shows the item page; when the card closes (cursor leaves it, or its timeout) the window returns to the map.
 - When the raid ends (or EFT quits) the window returns to the page it showed before the raid; scans outside a raid never switch back.
@@ -135,6 +145,7 @@ EFT's logs tell ChadScanner when a raid starts and ends. At spawn the ChadScanne
 - Progress: [TarkovTracker](https://tarkovtracker.org) API or the local file.
 - Quest events, game mode, raid start/end: EFT's own log files.
 - Raid maps: json.tarkov.dev (`maps`) and tarkov.dev's `maps.json` map configuration; the map itself is tarkovtracker.org's.
+- Trader and hideout levels: EFT's Traders and Hideout screens (OCR).
 
 ## For developers
 
