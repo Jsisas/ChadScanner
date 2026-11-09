@@ -281,6 +281,10 @@ impl Paths {
     pub fn exfil_miss(&self) -> PathBuf {
         self.appdata.join("exfil-miss.png")
     }
+    /// Last player-level badge capture that did not read (overwritten each time).
+    pub fn player_miss(&self) -> PathBuf {
+        self.appdata.join("player-miss.png")
+    }
     pub fn reports(&self) -> PathBuf {
         self.appdata.join("reports")
     }

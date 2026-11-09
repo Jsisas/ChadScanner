@@ -58,6 +58,8 @@ struct MenuState {
     /// (each is sent once, when first confirmed).
     previous: HashMap<String, u8>,
     confirmed: HashMap<String, u8>,
+    /// The player-level badge capture was saved for this screen visit already.
+    player_missed: bool,
 }
 
 pub struct App {
@@ -965,6 +967,7 @@ impl App {
             st.screen = Some(screen);
             st.previous.clear();
             st.confirmed.clear();
+            st.player_missed = false;
         }
         let best = |text: &str, names: &mut dyn Iterator<Item = (&String, &str)>| {
             names
@@ -989,8 +992,17 @@ impl App {
                     }
                 }
                 if let Some(img) = grab(screens::PLAYER) {
-                    if let Some(l) = screens::player_level(&img, |i| engine.read_line(i)) {
-                        put(PLAYER_KEY.into(), l);
+                    match screens::player_level(&img, |i| engine.read_line(i)) {
+                        Ok(l) => put(PLAYER_KEY.into(), l),
+                        Err(why) if !st.player_missed => {
+                            st.player_missed = true;
+                            let path = self.paths.player_miss();
+                            match img.save(&path) {
+                                Ok(()) => log::info!("menus: player level not read ({why}); saved {}", path.display()),
+                                Err(e) => log::warn!("menus: saving {}: {e}", path.display()),
+                            }
+                        }
+                        Err(_) => {}
                     }
                 }
             }

@@ -189,18 +189,26 @@ fn badge_level(g: &GrayImage) -> Option<u8> {
     (1..=3).contains(&strokes).then_some(strokes as u8)
 }
 
-/// Player level from a `PLAYER` capture: a light badge (else `None`, no OCR) holding a 1-79 number.
-pub fn player_level(img: &RgbImage, ocr: impl Fn(&RgbImage) -> String) -> Option<u8> {
-    let g = luma_crop(img, 0, 0, img.width() as i32, img.height() as i32)?;
-    if median(g.as_raw()) < 150 {
-        return None;
+/// Player level from a `PLAYER` capture: a light badge (else `Err`, no OCR) holding a 1-79 number.
+pub fn player_level(img: &RgbImage, ocr: impl Fn(&RgbImage) -> String) -> Result<u8, String> {
+    let g = luma_crop(img, 0, 0, img.width() as i32, img.height() as i32).ok_or("empty capture")?;
+    let m = median(g.as_raw());
+    if m < 150 {
+        return Err(format!("median {m} < 150"));
     }
-    let t = ocr(img);
-    let t = t.trim();
-    if t.is_empty() || t.len() > 2 || !t.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
+    // The badge border and bevel throw the line recogniser off (empty or "D"); read only the digits' face.
+    const INSET: u32 = 12;
+    let face = image::imageops::crop_imm(img, INSET, INSET, img.width() - 2 * INSET, img.height() - 2 * INSET).to_image();
+    let t = ocr(&face);
+    let digits: String = t.chars().filter(char::is_ascii_digit).collect();
+    if digits.is_empty() || digits.len() > 2 {
+        return Err(format!("OCR {t:?}"));
     }
-    t.parse().ok().filter(|l| (1..=79).contains(l))
+    let l: u8 = digits.parse().map_err(|_| format!("OCR {t:?}"))?;
+    if !(1..=79).contains(&l) {
+        return Err(format!("level {l} out of range"));
+    }
+    Ok(l)
 }
 
 /// Loyalty levels of the unlocked traders in a `TRADERS` capture, left to right.
@@ -355,14 +363,22 @@ mod tests {
 
     #[test]
     fn no_player_level_without_a_badge() {
-        assert_eq!(player_level(&RgbImage::new(64, 61), |_| panic!("OCR on a dark capture")), None);
+        assert!(player_level(&RgbImage::new(64, 61), |_| panic!("OCR on a dark capture")).is_err());
+    }
+
+    #[test]
+    fn player_level_ignores_ocr_noise() {
+        let img = RgbImage::from_pixel(65, 63, image::Rgb([200, 200, 200]));
+        assert_eq!(player_level(&img, |_| "4.".into()), Ok(4));
+        assert_eq!(player_level(&img, |_| "I 26 |".into()), Ok(26));
+        assert!(player_level(&img, |_| "abc".into()).is_err());
     }
 
     #[test]
     fn reads_the_player_level() {
         let Some(engine) = engine() else { return };
-        for (f, want) in [("screens-player-26-1440p.png", 26), ("screens-player-4-1440p.png", 4)] {
-            assert_eq!(player_level(&fixture(f), |i| engine.read_line(i)), Some(want), "{f}");
+        for (f, want) in [("screens-player-26-1440p.png", 26), ("screens-player-4-1440p.png", 4), ("screens-player-live-1440p.png", 7)] {
+            assert_eq!(player_level(&fixture(f), |i| engine.read_line(i)), Ok(want), "{f}");
         }
     }
 
