@@ -249,6 +249,12 @@ impl Tracker {
         self.eval(&tracker::traders_script(list));
     }
 
+    /// Player level read off a trader's screen.
+    pub fn level(&self, level: u8) {
+        self.eval(&tracker::mode_script(&self.mode));
+        self.eval(&tracker::level_script(level));
+    }
+
     /// Station levels read off the Hideout screen.
     pub fn hideout(&self, list: &[(String, String, u8)]) {
         self.eval(&tracker::mode_script(&self.mode));

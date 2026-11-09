@@ -936,6 +936,8 @@ impl App {
     /// to read (in a raid, EFT not focused, no menu screen, not ready yet).
     fn menu_poll(&self, st: &mut MenuState) -> Option<bool> {
         use crate::screens::{self, Frame, Screen};
+        /// Key of the player level among the confirmed reads (trader ids are hex, so no collision).
+        const PLAYER_KEY: &str = "player";
         if self.raid.lock().unwrap().in_raid || !win::eft_in_foreground() {
             st.tab = None;
             return None;
@@ -986,6 +988,11 @@ impl App {
                         put(id, read.level);
                     }
                 }
+                if let Some(img) = grab(screens::PLAYER) {
+                    if let Some(l) = screens::player_level(&img, |i| engine.read_line(i)) {
+                        put(PLAYER_KEY.into(), l);
+                    }
+                }
             }
             Screen::Hideout => {
                 let img = grab(screens::DETAIL)?;
@@ -1019,6 +1026,10 @@ impl App {
             Screen::Traders => {
                 let list: Vec<(String, String, u8)> =
                     fresh.iter().filter_map(|(id, l)| Some((id.clone(), cat.traders.get(id)?.clone(), *l))).collect();
+                if let Some((_, l)) = fresh.iter().find(|(id, _)| id == PLAYER_KEY) {
+                    log::info!("menus: player level {l}");
+                    self.ui.send(ui::Cmd::MenuLevel(*l));
+                }
                 if list.is_empty() {
                     return Some(settled);
                 }

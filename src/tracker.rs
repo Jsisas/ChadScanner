@@ -70,6 +70,11 @@ pub fn traders_script(list: &[(String, String, u8)]) -> String {
     format!("window.__chad&&__chad.traders({})", serde_json::Value::Array(items))
 }
 
+/// Raises the player level.
+pub fn level_script(level: u8) -> String {
+    format!("window.__chad&&__chad.level({level})")
+}
+
 /// Raises hideout station levels from `(station id, name, level)`.
 pub fn hideout_script(list: &[(String, String, u8)]) -> String {
     let items: Vec<_> = list.iter().map(|(id, name, level)| serde_json::json!({"id": id, "name": name, "level": level})).collect();
@@ -201,6 +206,7 @@ mod tests {
 
     #[test]
     fn menu_scripts_carry_ids_and_levels() {
+        assert_eq!(level_script(26), "window.__chad&&__chad.level(26)");
         assert_eq!(
             traders_script(&[("t1".into(), "Prapor".into(), 2)]),
             r#"window.__chad&&__chad.traders([{"id":"t1","level":2,"name":"Prapor"}])"#

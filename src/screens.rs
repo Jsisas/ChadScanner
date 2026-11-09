@@ -1,5 +1,5 @@
 //! Reading EFT's Traders and Hideout menus from screenshots: which tab is open, each unlocked trader's loyalty
-//! level (roman-numeral badge, crown = 4) and the level of the hideout station whose detail panel is open.
+//! level (roman-numeral badge, crown = 4), the player's level and the level of the hideout station whose detail panel is open.
 //!
 //! EFT draws its menu in a centred 16:9 box, so every position here is in 1080p reference units inside that box
 //! and `Frame` maps it to monitor pixels. Region captures are cropped with `Frame::rect`; the parsers take the
@@ -21,6 +21,8 @@ pub struct Ref {
 pub const NAV: Ref = Ref { x0: 0.0, y0: 1048.0, x1: 1920.0, y1: 1080.0 };
 /// Trader portrait row.
 pub const TRADERS: Ref = Ref { x0: 0.0, y0: 55.0, x1: 1140.0, y1: 205.0 };
+/// The player's level badge left of the portrait, top right of a trader's screen.
+pub const PLAYER: Ref = Ref { x0: 1735.0, y0: 48.0, x1: 1783.0, y1: 94.0 };
 /// Where a hideout station's detail panel can be (its top moves with the panel's height).
 pub const DETAIL: Ref = Ref { x0: 990.0, y0: 80.0, x1: 1910.0, y1: 800.0 };
 
@@ -187,6 +189,20 @@ fn badge_level(g: &GrayImage) -> Option<u8> {
     (1..=3).contains(&strokes).then_some(strokes as u8)
 }
 
+/// Player level from a `PLAYER` capture: a light badge (else `None`, no OCR) holding a 1-79 number.
+pub fn player_level(img: &RgbImage, ocr: impl Fn(&RgbImage) -> String) -> Option<u8> {
+    let g = luma_crop(img, 0, 0, img.width() as i32, img.height() as i32)?;
+    if median(g.as_raw()) < 150 {
+        return None;
+    }
+    let t = ocr(img);
+    let t = t.trim();
+    if t.is_empty() || t.len() > 2 || !t.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    t.parse().ok().filter(|l| (1..=79).contains(l))
+}
+
 /// Loyalty levels of the unlocked traders in a `TRADERS` capture, left to right.
 pub fn traders(img: &RgbImage, scale: f32, ocr: impl Fn(&RgbImage) -> String) -> Vec<TraderRead> {
     let px = |v: f32| (v * scale).round() as i32;
@@ -334,6 +350,19 @@ mod tests {
             let nav = fixture(f);
             let tab = tab_crop(&nav, SCALE, active_tab(&nav, SCALE).unwrap()).unwrap();
             assert_eq!(screen_of(&engine.read_line(&tab)), Some(want));
+        }
+    }
+
+    #[test]
+    fn no_player_level_without_a_badge() {
+        assert_eq!(player_level(&RgbImage::new(64, 61), |_| panic!("OCR on a dark capture")), None);
+    }
+
+    #[test]
+    fn reads_the_player_level() {
+        let Some(engine) = engine() else { return };
+        for (f, want) in [("screens-player-26-1440p.png", 26), ("screens-player-4-1440p.png", 4)] {
+            assert_eq!(player_level(&fixture(f), |i| engine.read_line(i)), Some(want), "{f}");
         }
     }
 

@@ -385,6 +385,17 @@
     postProgress();
   }
 
+  // Player level ChadScanner read off a trader's screen; raise-only, like trader levels (a misread must not lower it).
+  async function setPlayerLevel(level) {
+    const store = await until(() => tarkovStore() && tarkovState() && tarkovStore(), 10000, null);
+    if (!store) return log('tracker: no progress store for player level');
+    const now = typeof store.playerLevel === 'function' ? store.playerLevel() : Number(tarkovState().d.level) || 1;
+    if (now >= level) return;
+    store.setLevel(level);
+    toast('Level', 'Player level ' + now + ' → ' + level, false);
+    log('tracker: player level ' + now + ' → ' + level);
+  }
+
   // `list` is [{id, name, level}] (station ids): modules 1..level are completed, never un-completed (EFT never
   // un-builds a station). The site's prerequisite check runs once afterwards; levels it rejects are reported.
   async function setHideout(list) {
@@ -434,6 +445,7 @@
     fill: (id, name, targets, counts, firLeft, nonFirLeft) => run(() => fill(id, name, targets, counts, firLeft, nonFirLeft)),
     mode: (m) => run(() => setMode(m)),
     traders: (l) => run(() => setTraders(l)),
+    level: (l) => run(() => setPlayerLevel(l)),
     hideout: (l) => run(() => setHideout(l)),
   };
 

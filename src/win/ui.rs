@@ -50,6 +50,8 @@ pub enum Cmd {
     TrackerMode(String),
     /// Trader loyalty levels read off EFT's Traders screen as `(trader id, name, level)`; the site's store gets them.
     MenuTraders(Vec<(String, String, u8)>),
+    /// Player level read off a trader's screen; the site's store is raised to it.
+    MenuLevel(u8),
     /// Hideout station levels read off EFT's Hideout screen as `(station id, name, level)`.
     MenuHideout(Vec<(String, String, u8)>),
     /// A raid started: open tarkovtracker.org's map of this location (tarkov.dev map id) in the ChadScanner window.
@@ -350,6 +352,11 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                         Cmd::TrackerMode(m) => {
                             if let Some(t) = tracker.as_mut() {
                                 t.mode(&m);
+                            }
+                        }
+                        Cmd::MenuLevel(l) => {
+                            if let Some(t) = tracker.as_mut() {
+                                t.level(l);
                             }
                         }
                         Cmd::MenuTraders(l) => {
