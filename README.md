@@ -107,6 +107,7 @@ to English.
 Outside a raid, with EFT focused, ChadScanner reads EFT's own menus after every left click and writes the result into the TarkovTracker window:
 
 - **Traders** screen: each unlocked trader's loyalty level (roman-numeral badge; crown = 4).
+- **Inside a trader**: your player level (the light badge left of your portrait), raised the same way.
 - **Hideout** screen: the level of the station whose detail panel is open.
 - Levels only go up. A misread or a real loyalty drop never lowers a trader. Stations are never un-built.
 - TarkovTracker checks hideout prerequisites. Levels it rejects show the toast **TarkovTracker refused …: unmet trader, skill or station requirement**.
