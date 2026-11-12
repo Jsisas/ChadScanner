@@ -31,50 +31,44 @@
   // {mapId, siteMap, fs: full screen opened, rotation, keep: extract names | null, side: 'pmc' | 'scav' | null (null: not proven, shown as PMC), here: {pos, yaw} | null, back: route to restore at raid end}
   let raid = null;
 
-  // Hides every extract whose name is not in `raid.keep`; unhides everything when there is no raid. The site draws
-  // each extract as a circle-marker dot plus a badge marker at the same spot, and rebuilds them on toggles.
+  // Hides every extract name not in `raid.keep`; unhides everything no raid. Extracts are single pin
+  // markers (transits excluded); the site rebuilds them on toggles.
   const norm = (s) => s.trim().toLowerCase();
   const key = (ll) => ll.lat.toFixed(2) + ',' + ll.lng.toFixed(2);
-  const isBadge = (l) => l instanceof Lf.Marker && l.options.icon && l.options.icon.options.className === 'extract-marker';
-  const badgeName = (l) => {
-    const h = l.options.icon.options.html;
-    if (typeof h === 'string') return (/title="([^"]*)"/.exec(h) || [])[1] || '';
-    if (!h || !h.getAttribute) return '';
-    return h.getAttribute('title') || h.querySelector('[title]')?.getAttribute('title') || '';
+  const isBadge = (l) => {
+  if (!(l instanceof Lf.Marker)) return false;
+  const c = String(l.options.icon?.options.className || '').split(/\s+/);
+  return c.includes('extract-marker') && !c.includes('transit-marker');
   };
-  const isDot = (l) => l instanceof Lf.CircleMarker && l.options.radius === 3 && l.options.interactive === false;
+  const badgeName = (l) => {
+  const h = l.options.icon.options.html;
+  return (h && h.getAttribute && (h.getAttribute('aria-label') || h.textContent)) || '';
+  };
   function sweep(map) {
-    const badges = [];
-    const dots = [];
-    map.eachLayer((l) => {
-      if (isBadge(l)) badges.push(l);
-      else if (isDot(l)) dots.push(l);
-    });
-    const hide = new Set();
-    if (raid && raid.keep && chadOn) {
-      const keep = new Set(raid.keep.map(norm));
-      const kept = badges.filter((b) => keep.has(norm(badgeName(b))));
-      if (kept.length) {
-        // A pmc and a scav extract can share one spot: kept wins.
-        const keptAt = new Set(kept.map((b) => key(b.getLatLng())));
-        badges.forEach((b) => {
-          const k = key(b.getLatLng());
-          if (!keep.has(norm(badgeName(b))) && !keptAt.has(k)) hide.add(k);
-        });
-      } else if (badges.length && !raid.warned) {
-        raid.warned = true;
-        log('tracker: no extract on the map matches ' + raid.keep.join(', '));
-      }
-    }
-    badges.forEach((l) => {
-      const el = l.getElement();
-      if (el) el.style.display = hide.has(key(l.getLatLng())) ? 'none' : '';
-    });
-    dots.forEach((l) => {
-      const h = hide.has(key(l.getLatLng()));
-      const o = h ? 0 : 1;
-      if (l.options.opacity !== o || l.options.fillOpacity !== o) l.setStyle({ opacity: o, fillOpacity: o });
-    });
+  const badges = [];
+  map.eachLayer((l) => {
+  if (isBadge(l)) badges.push(l);
+  });
+  const hide = new Set();
+  if (raid && raid.keep && chadOn) {
+  const keep = new Set(raid.keep.map(norm));
+  const kept = badges.filter((b) => keep.has(norm(badgeName(b))));
+  if (kept.length) {
+  // A pmc and scav extract can share one spot: kept wins.
+  const keptAt = new Set(kept.map((b) => key(b.getLatLng())));
+  badges.forEach((b) => {
+  const k = key(b.getLatLng());
+  if (!keep.has(norm(badgeName(b))) && !keptAt.has(k)) hide.add(k);
+  });
+  } else if (badges.length && !raid.warned) {
+  raid.warned = true;
+  log('tracker: no extract on map matches ' + raid.keep.join(', '));
+  }
+  }
+  badges.forEach((l) => {
+  const el = l.getElement();
+  if (el) el.style.display = hide.has(key(l.getLatLng())) ? 'none' : '';
+  });
   }
   const sweepPending = new WeakSet();
   function scheduleSweep(map) {
@@ -89,13 +83,12 @@
   // Chad mode: ChadScanner's layer defaults with the site's own toggles shown off; any site toggle leaves it.
   // Starts on for every document and every new raid.
   let chadOn = true;
-  let applying = false; // our own toggle clicks pass the toolbar's capture listener
-  const LAYERS = ['PMC', 'Scav', 'PMC Spawns'];
+  let applying = false; // our own layer clicks are not user changes
+  const LAYERS = ['pmc', 'scav', 'shared', 'coop', 'spawns'];
   const PRESSED = 'border-primary-400/60 bg-primary-500/15 text-primary-100 light:text-primary-900'.split(' ');
   const UNPRESSED = 'border-transparent text-surface-300/60 hover:bg-white/5 hover:text-surface-100'.split(' ');
   const baseClass = (c) => c.split(/\s+/).filter((t) => t && !PRESSED.includes(t) && !UNPRESSED.includes(t)).join(' ');
-  const layerButton = (toolbar, label) =>
-    [...toolbar.querySelectorAll('button[aria-pressed]:not([data-chad-layers])')].find((x) => x.textContent.trim() === label);
+
   const toolbarOf = (map) => {
     for (let e = map.getContainer().parentElement; e; e = e.parentElement) {
       const t = e.querySelector('[data-testid="map-toolbar"]');
@@ -103,58 +96,62 @@
     }
     return null;
   };
-  // want: label -> bool
-  function setLayers(toolbar, want) {
-    applying = true;
-    try {
-      for (const label of LAYERS) {
-        const b = layerButton(toolbar, label);
-        if (b && b.getAttribute('aria-pressed') !== String(want[label])) b.click();
-      }
-    } finally {
-      applying = false;
-    }
-  }
-  // In a raid the side's own layer is on and the other side's off; until the exfil panel proves Scav the raid counts as
-  // PMC (Scav panels list Scav-only extracts, PMC panels often only shared ones). Outside a raid both are on. PMC spawns always on.
-  const chadLayers = () => {
-    const side = raid ? raid.side || 'pmc' : null;
-    return { PMC: side !== 'scav', Scav: side !== 'pmc', 'PMC Spawns': true };
+  const layerToggle = (toolbar) => toolbar.querySelector('[data-testid="map-layers-toggle"]');
+  const layerPanel = (toolbar) => {
+  const id = layerToggle(toolbar)?.getAttribute('aria-controls');
+  return id ? document.getElementById(id) : null;
   };
-  // Puts `toolbar` in the current mode: layers (Chad on only), the Chad button's pressed look, and the
-  // `data-chad-on` marker that makes pressed site toggles look unpressed.
-  function refreshToolbar(toolbar) {
-    if (chadOn) setLayers(toolbar, chadLayers());
-    toolbar.toggleAttribute('data-chad-on', chadOn);
-    const b = toolbar.querySelector('[data-chad-layers]');
-    if (b) {
-      b.className = baseClass(b.className) + ' ' + (chadOn ? PRESSED : UNPRESSED).join(' ');
-      b.setAttribute('aria-pressed', String(chadOn));
-    }
+  const layerRow = (toolbar, k) => layerPanel(toolbar)?.querySelector('button[data-layer="' + k + '"]');
+  // want: layer key -> bool. Rows exist only while the panel is open; reopen/close to keep saved state.
+  async function setLayers(toolbar, want) {
+  const toggle = layerToggle(toolbar);
+  if (!toggle) return log('tracker: no map layers button');
+  applying = true;
+  try {
+  const wasOpen = toggle.getAttribute('aria-expanded') === 'true';
+  if (!wasOpen) {
+  toggle.click();
+  const ok = await until(() => layerRow(toolbar, 'pmc') || layerRow(toolbar, 'spawns'), 2000, null);
+  if (!ok) {
+  log('tracker: map layers panel did not open');
+  if (toggle.getAttribute('aria-expanded') === 'true') toggle.click();
+  return;
+  }
+  }
+  for (const k of LAYERS) {
+  const r = layerRow(toolbar, k);
+  if (r && k in want && r.getAttribute('aria-pressed') !== String(want[k])) r.click();
+  }
+  if (!wasOpen) toggle.click();
+  } finally {
+  applying = false;
+  }
+  }
+  // In raid side's own extracts on and other side's off; until exfil panel proves Scav raid counts
+  // PMC. Outside raid both on. Shared/coop serve both sides. Spawns always on.
+  const chadLayers = () => {
+  const side = raid ? raid.side || 'pmc' : null;
+  return { pmc: side !== 'scav', scav: side !== 'pmc', shared: true, coop: true, spawns: true };
+  };
+  // Chad button's pressed look only.
+  function refreshToolbarLook(toolbar) {
+  const b = toolbar.querySelector('[data-chad-layers]');
+  if (b) {
+  b.className = baseClass(b.className) + ' ' + (chadOn ? PRESSED : UNPRESSED).join(' ');
+  b.setAttribute('aria-pressed', String(chadOn));
+  }
+  }
+  // Puts `toolbar` in current mode: layers (Chad on only) and Chad button's pressed look.
+  async function refreshToolbar(toolbar) {
+  refreshToolbarLook(toolbar);
+  if (chadOn) await setLayers(toolbar, chadLayers());
   }
   const refreshAll = () => {
     document.querySelectorAll('[data-testid="map-toolbar"]').forEach(refreshToolbar);
     if (raid) raid.warned = false;
     liveMaps().forEach(sweep);
   };
-  // Styles the site's pressed toggles like unpressed ones while a toolbar has `data-chad-on`; the colours are read
-  // from a hidden unpressed copy of the PMC button so they follow the site's theme.
-  function ensureChadStyle(toolbar) {
-    if (document.getElementById('chad-layers-style')) return;
-    const pmc = layerButton(toolbar, 'PMC');
-    if (!pmc) return;
-    const probe = document.createElement('button');
-    probe.className = baseClass(pmc.className) + ' ' + UNPRESSED.join(' ');
-    probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none';
-    toolbar.appendChild(probe);
-    const cs = getComputedStyle(probe);
-    const [c, bc, bg] = [cs.color, cs.borderTopColor, cs.backgroundColor];
-    probe.remove();
-    const s = document.createElement('style');
-    s.id = 'chad-layers-style';
-    s.textContent = `[data-chad-on] button[aria-pressed="true"]:not([data-chad-layers]){color:${c}!important;border-color:${bc}!important;background-color:${bg}!important}`;
-    document.head.appendChild(s);
-  }
+
 
   // The player's arrow: one marker per map, turned by the screenshot yaw plus the map's rotation.
   const arrows = new WeakMap();
@@ -588,55 +585,53 @@
     };
     sf.after(b);
   }
-  // The site's map toolbar has PMC / Scav / PMC Spawns toggles; the Chad button next to them is an exclusive mode:
-  // on, the three toggles look off and ChadScanner's layers apply; pressing any of them leaves Chad mode.
+  // site's map toolbar has one layers toggle opening a panel of layer rows; Chad button next to it is an exclusive mode:
+  // on, ChadScanner's layers apply; changing any layer row leaves Chad mode.
+  let chadListener = false;
   function ensureChadLayersButtons() {
-    document.querySelectorAll('[data-testid="map-toolbar"]').forEach((toolbar) => {
-      if (toolbar.querySelector('[data-chad-layers]')) return;
-      const toggles = [...toolbar.querySelectorAll('button[aria-pressed]:not([data-chad-layers])')];
-      const pmc = toggles.find((x) => x.textContent.trim() === 'PMC');
-      if (!pmc) return;
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = baseClass(pmc.className);
-      b.dataset.chadLayers = '1';
-      b.title =
-        "Chad mode: your side's extracts and PMC spawns; in raid only your extracts. Click PMC, Scav or PMC Spawns for the plain TarkovTracker map";
-      const icon = document.createElement('img');
-      icon.src = ICON;
-      icon.alt = '';
-      icon.className = 'h-4 w-4 shrink-0';
-      const label = document.createElement('span');
-      label.className = 'whitespace-nowrap';
-      label.textContent = 'Chad';
-      b.append(icon, label);
-      b.onclick = () => {
-        chadOn = !chadOn;
-        if (!chadOn) document.querySelectorAll('[data-testid="map-toolbar"]').forEach((t) => setLayers(t, { PMC: false, Scav: false, 'PMC Spawns': false }));
-        refreshAll();
-      };
-      if (!toolbar.dataset.chadListener) {
-        toolbar.dataset.chadListener = '1';
-        toolbar.addEventListener(
-          'click',
-          (e) => {
-            if (applying || !chadOn) return;
-            const t = e.target.closest('button[aria-pressed]');
-            if (!t || t.dataset.chadLayers || !LAYERS.includes(t.textContent.trim())) return;
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            chadOn = false;
-            const label = t.textContent.trim();
-            setLayers(toolbar, { PMC: label === 'PMC', Scav: label === 'Scav', 'PMC Spawns': label === 'PMC Spawns' });
-            refreshAll();
-          },
-          true,
-        );
-      }
-      toggles[toggles.length - 1].after(b);
-      ensureChadStyle(toolbar);
-      refreshToolbar(toolbar);
-    });
+  if (!chadListener) {
+  chadListener = true;
+  document.addEventListener(
+  'click',
+  (e) => {
+  if (applying || !chadOn || !e.target.closest || !e.target.closest('[data-testid="map-layers-panel"] button[data-layer]')) return;
+  chadOn = false;
+  document.querySelectorAll('[data-testid="map-toolbar"]').forEach(refreshToolbarLook);
+  liveMaps().forEach(sweep);
+  },
+  true,
+  );
+  }
+  document.querySelectorAll('[data-testid="map-toolbar"]').forEach((toolbar) => {
+  if (toolbar.querySelector('[data-chad-layers]')) return;
+  const toggle = layerToggle(toolbar);
+  if (!toggle) return;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = baseClass(toggle.className);
+  b.dataset.chadLayers = '1';
+  b.title =
+  "Chad mode: your side's extracts and PMC spawns; in raid only your extracts. Change any map layer for the plain TarkovTracker map";
+  const icon = document.createElement('img');
+  icon.src = ICON;
+  icon.alt = '';
+  icon.className = 'h-4 w-4 shrink-0';
+  const label = document.createElement('span');
+  label.className = 'whitespace-nowrap';
+  label.textContent = 'Chad';
+  b.append(icon, label);
+  b.onclick = () => {
+  chadOn = !chadOn;
+  if (!chadOn) {
+  document
+  .querySelectorAll('[data-testid="map-toolbar"]')
+  .forEach((t) => setLayers(t, { pmc: true, scav: true, shared: true, coop: true, spawns: false }));
+  }
+  refreshAll();
+  };
+  toggle.after(b);
+  refreshToolbar(toolbar);
+  });
   }
   const watch = () =>
     new MutationObserver(() => {
