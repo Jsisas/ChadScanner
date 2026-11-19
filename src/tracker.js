@@ -103,30 +103,47 @@
   };
   const layerRow = (toolbar, k) => layerPanel(toolbar)?.querySelector('button[data-layer="' + k + '"]');
   // want: layer key -> bool. Rows exist only while the panel is open; reopen/close to keep saved state.
-  async function setLayers(toolbar, want) {
-  const toggle = layerToggle(toolbar);
-  if (!toggle) return log('tracker: no map layers button');
-  applying = true;
-  try {
-  const wasOpen = toggle.getAttribute('aria-expanded') === 'true';
-  if (!wasOpen) {
-  toggle.click();
-  const ok = await until(() => layerRow(toolbar, 'pmc') || layerRow(toolbar, 'spawns'), 2000, null);
-  if (!ok) {
-  log('tracker: map layers panel did not open');
-  if (toggle.getAttribute('aria-expanded') === 'true') toggle.click();
-  return;
+  // Layer jobs run one at a time (queueLayers): overlapping jobs read the panel before Vue re-renders it, so one
+  // closed the panel the other opened or clicked a row twice, and the first to finish cleared `applying` while the
+  // other was still clicking, which the user-click listener took as a site toggle and left Chad mode.
+  let layerQueue = Promise.resolve();
+  const queueLayers = (f) => {
+    layerQueue = layerQueue.then(f).catch((e) => log('tracker: ' + e));
+    return layerQueue;
+  };
+  const expanded = (toggle) => toggle.getAttribute('aria-expanded') === 'true';
+  async function setLayersNow(toolbar, want) {
+    if (!toolbar.isConnected) return;
+    const toggle = layerToggle(toolbar);
+    if (!toggle) return log('tracker: no map layers button');
+    applying = true;
+    try {
+      const wasOpen = expanded(toggle);
+      if (!wasOpen) {
+        toggle.click();
+        const ok = await until(() => layerRow(toolbar, 'pmc') || layerRow(toolbar, 'spawns'), 2000, null);
+        if (!ok) {
+          log('tracker: map layers panel did not open');
+          if (expanded(toggle)) toggle.click();
+          return;
+        }
+      }
+      for (const k of LAYERS) {
+        const r = layerRow(toolbar, k);
+        if (!r || !(k in want) || r.getAttribute('aria-pressed') === String(want[k])) continue;
+        r.click();
+        // Settle before the next row or job reads it; the row may be re-rendered, so look it up again.
+        await until(() => layerRow(toolbar, k)?.getAttribute('aria-pressed') === String(want[k]), 1000, null);
+      }
+      if (!wasOpen && expanded(toggle)) {
+        toggle.click();
+        await until(() => !expanded(toggle), 1000, null);
+      }
+    } finally {
+      applying = false;
+    }
   }
-  }
-  for (const k of LAYERS) {
-  const r = layerRow(toolbar, k);
-  if (r && k in want && r.getAttribute('aria-pressed') !== String(want[k])) r.click();
-  }
-  if (!wasOpen) toggle.click();
-  } finally {
-  applying = false;
-  }
-  }
+  const setLayers = (toolbar, want) => queueLayers(() => setLayersNow(toolbar, want));
   // In raid side's own extracts on and other side's off; until exfil panel proves Scav raid counts
   // PMC. Outside raid both on. Shared/coop serve both sides. Spawns always on.
   const chadLayers = () => {
@@ -142,9 +159,10 @@
   }
   }
   // Puts `toolbar` in current mode: layers (Chad on only) and Chad button's pressed look.
-  async function refreshToolbar(toolbar) {
-  refreshToolbarLook(toolbar);
-  if (chadOn) await setLayers(toolbar, chadLayers());
+  // The layers are read when the job runs, so a queued refresh applies the newest raid side and Chad state.
+  function refreshToolbar(toolbar) {
+    refreshToolbarLook(toolbar);
+    return queueLayers(() => (chadOn ? setLayersNow(toolbar, chadLayers()) : undefined));
   }
   const refreshAll = () => {
     document.querySelectorAll('[data-testid="map-toolbar"]').forEach(refreshToolbar);
@@ -221,7 +239,8 @@
   // Arrow steps pass null: they are never cancelled, so no key press is lost.
   async function open(id, name, g) {
     const stale = () => g != null && g !== gen;
-    exitFullscreen();
+    // The item page leaves the map's full screen; showRaid reopens it on the way back.
+    if (exitFullscreen() && raid) raid.fs = false;
     if (modalFor(id)) return true;
     if (stale()) return false;
     raised = [];
@@ -479,7 +498,13 @@
     b.click();
     if (!(await until(() => document.querySelector(FS_OVERLAY + ' .leaflet-container'), 5000, null))) log('tracker: full-screen map did not open');
   }
-  const exitFullscreen = () => document.querySelector('[data-testid="map-fullscreen-exit"]')?.click();
+  // True when full screen was open and is being left.
+  const exitFullscreen = () => {
+    const b = document.querySelector('[data-testid="map-fullscreen-exit"]');
+    if (!b) return false;
+    b.click();
+    return true;
+  };
   const applyRaid = (map) => {
     sweep(map);
     drawHere(map, false);
@@ -594,7 +619,10 @@
   document.addEventListener(
   'click',
   (e) => {
-  if (applying || !chadOn || !e.target.closest || !e.target.closest('[data-testid="map-layers-panel"] button[data-layer]')) return;
+  if (applying || !chadOn || !e.target.closest) return;
+  // The panel is found the way setLayers finds it (the toggle's aria-controls), not by a test id it may lack.
+  const row = e.target.closest('button[data-layer]');
+  if (!row || ![...document.querySelectorAll('[data-testid="map-toolbar"]')].some((t) => layerPanel(t)?.contains(row))) return;
   chadOn = false;
   document.querySelectorAll('[data-testid="map-toolbar"]').forEach(refreshToolbarLook);
   liveMaps().forEach(sweep);

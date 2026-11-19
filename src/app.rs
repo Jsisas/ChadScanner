@@ -241,13 +241,19 @@ impl App {
             } else {
                 self.ui.send(ui::Cmd::HideCard);
                 *self.last_item.lock().unwrap() = None;
-                match self.scan(req) {
+                let r = match self.scan(req) {
                     Ok(r) => r,
                     Err(e) => {
                         log::warn!("scan failed: {e:#}");
                         (None, Vec::new(), format!("error: {e:#}"))
                     }
+                };
+                // HideCard above skips the tracker's back-to-map, since a new item page normally replaces the old
+                // one; when this scan opened none, the raid map must still come back.
+                if self.last_item.lock().unwrap().is_none() {
+                    self.ui.send(ui::Cmd::TrackerBack);
                 }
+                r
             };
             let ms = started.elapsed().as_millis();
             log::info!("scan at ({},{}) took {ms} ms: {outcome}", req.x, req.y);

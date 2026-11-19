@@ -35,6 +35,8 @@ pub enum Cmd {
     UpdateLabel(String),
     /// Remember this item; open it in the TarkovTracker window when the window is shown.
     TrackerItem { id: String, name: String },
+    /// A scan showed no item: in raid, the tracker leaves an item page for the map.
+    TrackerBack,
     /// One Arrow key press for item `id`; `targets` in fill order (Up: already filtered by `fillable`).
     TrackerStep { up: bool, id: String, name: String, targets: Vec<crate::needs::Target> },
     /// Chad Fill result: set each of `targets` to the matching `counts` entry.
@@ -339,6 +341,11 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                         Cmd::TrackerItem { id, name } => {
                             if let Some(t) = tracker.as_mut() {
                                 t.item(&id, &name);
+                            }
+                        }
+                        Cmd::TrackerBack => {
+                            if let Some(t) = tracker.as_mut() {
+                                t.card_closed();
                             }
                         }
                         Cmd::TrackerStep { up, id, name, targets } => match tracker.as_mut() {

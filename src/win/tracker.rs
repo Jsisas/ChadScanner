@@ -96,6 +96,8 @@ pub struct Tracker {
     /// misses the push made while its store was not ready.
     mode: String,
     raid: Option<RaidScripts>,
+    /// An item page replaced the raid map; the next card close brings the map back.
+    item_up: bool,
 }
 
 impl Tracker {
@@ -128,6 +130,7 @@ impl Tracker {
             open,
             mode: mode.to_owned(),
             raid: None,
+            item_up: false,
         })
     }
 
@@ -174,6 +177,7 @@ impl Tracker {
         let s = tracker::raid_script(map_id, rotation);
         self.eval(&s);
         self.raid = Some(RaidScripts { map: s, extracts: None, here: None });
+        self.item_up = false;
         if !self.visible() {
             unsafe {
                 let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
@@ -196,6 +200,8 @@ impl Tracker {
     pub fn raid_position(&mut self, json: &str) {
         let Some(raid) = &mut self.raid else { return };
         let s = tracker::here_script(json);
+        // The page shows the map for the position, replacing any item page.
+        self.item_up = false;
         if let Err(e) = self.webview.evaluate_script(&s) {
             log::warn!("tracker: evaluate_script: {e}");
         }
@@ -205,12 +211,13 @@ impl Tracker {
     /// The raid is over: the page drops the arrow and the extract filter and goes back to where it was.
     pub fn raid_end(&mut self) {
         self.raid = None;
+        self.item_up = false;
         self.eval(tracker::raid_end_script());
     }
 
     /// The scan card closed: back to the map when in raid.
     pub fn card_closed(&mut self) {
-        if self.raid.is_some() {
+        if self.raid.is_some() && std::mem::take(&mut self.item_up) {
             self.eval(tracker::raid_show_script());
         }
     }
@@ -223,6 +230,7 @@ impl Tracker {
         }
         self.eval(&tracker::mode_script(&self.mode));
         self.eval(&tracker::open_script(id, name));
+        self.item_up = self.raid.is_some();
     }
 
     /// ChadScanner's game mode changed: switch the site to `m`.
@@ -232,9 +240,11 @@ impl Tracker {
     }
 
     /// One Arrow key press for item `id`; the script writes the chosen count into the site's progress store.
-    pub fn step(&self, id: &str, name: &str, up: bool, targets: &[Target]) {
+    pub fn step(&mut self, id: &str, name: &str, up: bool, targets: &[Target]) {
         self.eval(&tracker::mode_script(&self.mode));
         self.eval(&tracker::step_script(id, name, up, targets));
+        // The step opens the item page too.
+        self.item_up = self.raid.is_some();
     }
 
     /// Chad Fill for item `id`; the script sets each of `targets` to its `counts` entry in the site's progress store.
