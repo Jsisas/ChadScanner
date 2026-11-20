@@ -34,6 +34,8 @@
   // Hides every extract name not in `raid.keep`; unhides everything no raid. Extracts are single pin
   // markers (transits excluded); the site rebuilds them on toggles.
   const norm = (s) => s.trim().toLowerCase();
+  // The site labels a badge "Name, Key" or "Name, Conditional, Green smoke": the qualifiers follow the first comma, the names we keep (json.tarkov.dev) have none.
+  const extractName = (s) => norm(s.split(',')[0]);
   const key = (ll) => ll.lat.toFixed(2) + ',' + ll.lng.toFixed(2);
   const isBadge = (l) => {
   if (!(l instanceof Lf.Marker)) return false;
@@ -42,7 +44,8 @@
   };
   const badgeName = (l) => {
   const h = l.options.icon.options.html;
-  return (h && h.getAttribute && (h.getAttribute('aria-label') || h.textContent)) || '';
+  const el = h && h.getAttribute ? h.querySelector?.('[aria-label]') || h : null;
+  return (el && (el.getAttribute('aria-label') || el.textContent)) || '';
   };
   function sweep(map) {
   const badges = [];
@@ -52,13 +55,13 @@
   const hide = new Set();
   if (raid && raid.keep && chadOn) {
   const keep = new Set(raid.keep.map(norm));
-  const kept = badges.filter((b) => keep.has(norm(badgeName(b))));
+  const kept = badges.filter((b) => keep.has(extractName(badgeName(b))));
   if (kept.length) {
   // A pmc and scav extract can share one spot: kept wins.
   const keptAt = new Set(kept.map((b) => key(b.getLatLng())));
   badges.forEach((b) => {
   const k = key(b.getLatLng());
-  if (!keep.has(norm(badgeName(b))) && !keptAt.has(k)) hide.add(k);
+  if (!keep.has(extractName(badgeName(b))) && !keptAt.has(k)) hide.add(k);
   });
   } else if (badges.length && !raid.warned) {
   raid.warned = true;

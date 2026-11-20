@@ -177,6 +177,52 @@ mod tests {
         assert_exit_rows(&bands(&img, SCALE));
     }
 
+    fn green_block(img: &mut RgbImage, x0: u32, x1: u32, y0: u32, y1: u32) {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                img.put_pixel(x, y, image::Rgb([108, 159, 5]));
+            }
+        }
+    }
+
+    #[test]
+    fn no_header_in_blank_or_empty_images() {
+        assert_eq!(header(&RgbImage::new(0, 0), 1.0), None);
+        assert_eq!(header(&RgbImage::new(200, 50), 1.0), None);
+        assert!(bands(&RgbImage::new(200, 50), 1.0).is_empty());
+    }
+
+    #[test]
+    fn header_too_short_is_ignored() {
+        let mut img = RgbImage::new(200, 60);
+        green_block(&mut img, 10, 190, 5, 15);
+        assert_eq!(header(&img, 1.0), None);
+        // A later, tall-enough band is still found after the short one.
+        green_block(&mut img, 10, 190, 20, 55);
+        assert_eq!(header(&img, 1.0), Some((10, 190, 55)));
+    }
+
+    #[test]
+    fn header_running_to_the_bottom_edge() {
+        let mut img = RgbImage::new(200, 50);
+        green_block(&mut img, 20, 180, 10, 50);
+        assert_eq!(header(&img, 1.0), Some((20, 180, 50)));
+    }
+
+    #[test]
+    fn bands_without_header_scan_whole_image() {
+        let mut img = RgbImage::new(100, 60);
+        for y in 20..34 {
+            for x in 30..70 {
+                img.put_pixel(x, y, image::Rgb([230, 230, 230]));
+            }
+        }
+        let b = bands(&img, 1.0);
+        assert_eq!(b, vec![(26, 17, 48, 20)]);
+        let lines = read_lines(&img, 1.0, |l| format!("{}x{}", l.width(), l.height()));
+        assert_eq!(lines, vec!["48x20".to_string()]);
+    }
+
     /// OCR end to end; needs ChadVision's model files next to this repo.
     #[test]
     fn reads_the_customs_panel() {

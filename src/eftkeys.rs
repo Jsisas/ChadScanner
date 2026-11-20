@@ -212,4 +212,17 @@ mod tests {
         assert!(parse(&ini(r#"{"keyName":"Nope","variants":[],"pressType":"Press"}"#)).is_err());
         assert!(parse("not json").is_err());
     }
+
+    #[test]
+    fn axis_variants_are_skipped_and_hold_label() {
+        let k = parse(&ini(r#"{"keyName":"WatchTimerAndExits","variants":[{"keyCode":["P"],"isAxis":true},{"keyCode":["Alpha4"]}],"pressType":"Continuous"}"#)).unwrap();
+        assert_eq!(k.bindings, vec![Binding { key: Key::Vk(0x34), held: vec![] }]);
+        assert_eq!(k.label, "hold 4");
+    }
+
+    #[test]
+    fn single_char_lowercase_is_not_a_key() {
+        assert_eq!(key("a"), None);
+        assert_eq!(key("O"), Some(Key::Vk(0x4F)));
+    }
 }

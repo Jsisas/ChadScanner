@@ -299,7 +299,8 @@ mod tests {
     fn unfinished_entry_is_held_back() {
         let cut = LOG.find("    \"type\": 12").unwrap();
         let (done, rest) = split_complete(&LOG[..cut]);
-        assert!(done.is_empty() && !rest.is_empty());
+        assert!(done.is_empty());
+        assert!(!rest.is_empty());
         let (done, rest) = split_complete(LOG);
         assert_eq!((done.len(), rest.len()), (LOG.len(), 0));
     }
@@ -352,5 +353,179 @@ mod tests {
         assert_eq!(parse(&log.replace('\n', "\r\n")), want);
         // A `|output|application|GameStarted:` line matches too; harmless because output_000.log is not tracked.
         assert_eq!(parse("2026-11-06 12:07:35.942|1.3.0.1.48558|Info|output|application|GameStarted:1(0)\n"), vec![Event::RaidStarted]);
+    }
+
+    fn entry(body: &str) -> String {
+        let json = serde_json::from_str::<serde_json::Value>(body).and_then(|v| serde_json::to_string_pretty(&v)).unwrap_or_else(|_| format!("{{\n{body}\n}}"));
+        format!("2026-10-30 14:52:11.158|1.0.0|Info|push-notifications|Got notification | ChatMessageReceived\n{json}\n")
+    }
+
+    #[test]
+    fn chat_event_edge_cases() {
+        // String type is accepted; started task.
+        assert_eq!(parse(&entry(r#"{"message": {"type": "10", "templateId": "abc text"}}"#)), vec![Event::TaskStarted("abc".into())]);
+        // Flea sale with no system data.
+        assert_eq!(
+            parse(&entry(r#"{"message": {"type": 4, "templateId": "5bdabfb886f7743e152e867e 0"}}"#)),
+            vec![Event::FleaSold { item: None, count: None }]
+        );
+        for body in [
+            r#"{"message": {"type": 4, "templateId": "other 0"}}"#,  // type 4 but not the flea template
+            r#"{"message": {"type": 7, "templateId": "abc x"}}"#,    // unknown kind
+            r#"{"message": {"type": 10}}"#,                          // no template
+            r#"{"message": {"type": 10, "templateId": " x"}}"#,      // empty task id
+            r#"{"message": {"type": "ten", "templateId": "abc x"}}"#, // unparsable string type
+            r#"{"message": {"type": 1.5, "templateId": "abc x"}}"#,  // non-integer number
+            r#"{"message": {"type": null, "templateId": "abc x"}}"#, // wrong type kind
+            r#"{"nomessage": 1}"#,
+            "{ not json",
+        ] {
+            assert!(parse(&entry(body)).is_empty(), "{body}");
+        }
+        // A chat notification with no JSON body yields nothing.
+        assert!(parse("2026-10-30 14:52:11.158|1.0.0|Info|push-notifications|Got notification | ChatMessageReceived\n").is_empty());
+    }
+
+    #[test]
+    fn unknown_session_mode_and_plain_lines_are_ignored() {
+        assert!(parse("2026-10-30 14:52:13.000|1.0.0|Info|application|Session mode: Bogus\n").is_empty());
+        assert!(parse("2026-10-30 14:52:13.000|1.0.0|Info|application|something unrelated\n").is_empty());
+    }
+
+    #[test]
+    fn split_complete_edge_cases() {
+        assert_eq!(split_complete(""), ("", ""));
+        // Newline-terminated plain line is complete.
+        let line = "2026-10-30 14:52:13.000|1.0.0|Info|application|x\n";
+        assert_eq!(split_complete(line), (line, ""));
+        // No trailing newline: still open.
+        let open = "2026-10-30 14:52:13.000|1.0.0|Info|application|x";
+        assert_eq!(split_complete(open), ("", open));
+        // JSON body opened but not closed.
+        let half = "2026-10-30 14:52:13.000|1.0.0|Info|x|y\n{\n  \"a\": 1\n";
+        assert_eq!(split_complete(half), ("", half));
+    }
+
+    #[test]
+    fn session_key_and_tracked() {
+        assert_eq!(session_key("log_2026.10.30_9-05-07_1.0"), Some((2026, 10, 30, 9, 5, 7)));
+        assert_eq!(session_key("other"), None);
+        assert!(tracked(Path::new("a/log x push-notifications_000.log")));
+        assert!(tracked(Path::new("a/log x APPLICATION_000.LOG")));
+        assert!(!tracked(Path::new("a/log x output_000.log")));
+        assert!(!tracked(Path::new("a/push-notifications.txt")));
+        assert!(!tracked(Path::new("")));
+    }
+
+    #[test]
+    fn logstate_roundtrip_and_bad_file() {
+        let dir = std::env::temp_dir().join(format!("chadscanner-test-{}-logstate", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("logstate.json");
+        assert_eq!(LogState::load(&p), LogState::default());
+        let mut s = LogState::default();
+        s.last_seen_session = Some("log_2026.10.30_9-00-00".into());
+        s.offsets.insert("a.log".into(), 42);
+        s.save(&p);
+        assert_eq!(LogState::load(&p), s);
+        std::fs::write(&p, "garbage").unwrap();
+        assert_eq!(LogState::load(&p), LogState::default());
+        // Saving onto a directory fails (logged, not panicking) and leaves it intact.
+        let blocked = dir.join("blocked");
+        std::fs::create_dir_all(&blocked).unwrap();
+        s.save(&blocked);
+        assert!(blocked.is_dir());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_logs_dir_yields_nothing() {
+        let root = std::env::temp_dir().join(format!("chadscanner-test-{}-emptylogs", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("stray.txt"), "x").unwrap();
+        std::fs::create_dir_all(root.join("not-a-session")).unwrap();
+        assert!(sessions(&root).is_empty());
+        let (mut t, ev) = Tailer::start(root.clone(), LogState::default());
+        assert!(ev.is_empty());
+        assert!(t.state.last_seen_session.is_none());
+        assert!(t.poll().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn partial_entry_is_carried_and_shrunk_file_restarts() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!("chadscanner-test-{}-tailcarry", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let s1 = root.join("log_2026.10.30_9-00-00_1.0");
+        std::fs::create_dir_all(&s1).unwrap();
+        let file = s1.join("a push-notifications_000.log");
+        std::fs::write(&file, "").unwrap();
+        let (mut t, _) = Tailer::start(root.clone(), LogState::default());
+
+        let full = entry(r#"{"message": {"type": 12, "templateId": "abc x"}}"#);
+        let (a, b) = full.split_at(full.find("\"type\"").unwrap());
+        let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+        f.write_all(a.as_bytes()).unwrap();
+        assert!(t.poll().is_empty());
+        f.write_all(b.as_bytes()).unwrap();
+        assert_eq!(t.poll(), vec![Event::TaskFinished("abc".into())]);
+
+        // File replaced by a shorter one: reading starts over from the top.
+        std::fs::write(&file, entry(r#"{"message": {"type": 11, "templateId": "d"}}"#)).unwrap();
+        assert!(t.state.offsets.values().all(|&o| o > std::fs::metadata(&file).unwrap().len()));
+        assert_eq!(t.poll(), vec![Event::TaskFailed("d".into())]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn start_replays_pending_tail_of_seen_session() {
+        let root = std::env::temp_dir().join(format!("chadscanner-test-{}-replay", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let s1 = root.join("log_2026.10.30_9-00-00_1.0");
+        std::fs::create_dir_all(&s1).unwrap();
+        let full = entry(r#"{"message": {"type": 12, "templateId": "abc x"}}"#);
+        // Unterminated last entry is held back in `pending`, not reported.
+        std::fs::write(s1.join("a push-notifications_000.log"), full.trim_end()).unwrap();
+        let state = LogState { last_seen_session: Some("log_2026.10.30_9-00-00_1.0".into()), offsets: HashMap::new() };
+        let (mut t, ev) = Tailer::start(root.clone(), state);
+        assert!(ev.is_empty());
+        assert_eq!(t.pending.len(), 1);
+        assert!(t.poll().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn read_from_unreadable_files() {
+        let root = std::env::temp_dir().join(format!("chadscanner-test-{}-readfrom", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut pending = HashMap::new();
+        // Missing file: offset unchanged.
+        let (ev, off) = Tailer::read_from(&root.join("missing.log"), 7, String::new(), &mut pending, "m");
+        assert!((ev, off) == (Vec::new(), 7));
+        // A directory opens but cannot be read.
+        let (ev, off) = Tailer::read_from(&root, 0, String::new(), &mut pending, "d");
+        assert!((ev, off) == (Vec::new(), 0));
+        assert!(pending.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn default_logs_dir_uses_existing_override_only() {
+        let root = std::env::temp_dir().join(format!("chadscanner-test-{}-override", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        assert_eq!(default_logs_dir(&format!("  {}  ", root.display())), Some(root.clone()));
+        assert_eq!(default_logs_dir(&root.join("nope").to_string_lossy()), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn default_logs_dir_without_override_never_invents_a_folder() {
+        for blank in ["", "   "] {
+            assert!(default_logs_dir(blank).is_none_or(|p| p.is_dir()));
+        }
     }
 }

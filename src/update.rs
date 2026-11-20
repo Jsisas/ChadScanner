@@ -414,4 +414,93 @@ mod tests {
         assert_eq!(std::fs::read_to_string(d.join(EXE)).unwrap(), "new");
         assert!(d.join(STAGING).join(READY).exists());
     }
+
+    #[test]
+    fn swap_exe_fails_when_old_exe_cannot_be_removed() {
+        let d = tmp("swap-old-stuck");
+        put(d.join(EXE), "cur");
+        put(d.join(STAGING).join(EXE), "new");
+        // A non-empty directory in the way of exe.old: remove_file errors with something other than NotFound.
+        put(d.join("chadscanner.exe.old/inner"), "x");
+        let err = format!("{:#}", swap_exe(&d.join(EXE), &d).unwrap_err());
+        assert!(err.contains("removing the previous exe.old"), "{err}");
+        assert_eq!(std::fs::read_to_string(d.join(EXE)).unwrap(), "cur");
+    }
+
+    #[test]
+    fn swap_exe_rolls_back_when_staged_exe_is_missing() {
+        let d = tmp("swap-no-staged");
+        put(d.join(EXE), "cur");
+        std::fs::create_dir_all(d.join(STAGING)).unwrap();
+        let err = format!("{:#}", swap_exe(&d.join(EXE), &d).unwrap_err());
+        assert!(err.contains("moving the new exe into place"), "{err}");
+        assert_eq!(std::fs::read_to_string(d.join(EXE)).unwrap(), "cur");
+        assert!(!d.join("chadscanner.exe.old").exists());
+    }
+
+    #[test]
+    fn swap_exe_fails_when_running_exe_is_missing() {
+        let d = tmp("swap-no-exe");
+        put(d.join(STAGING).join(EXE), "new");
+        let err = format!("{:#}", swap_exe(&d.join(EXE), &d).unwrap_err());
+        assert!(err.contains("moving the running exe aside"), "{err}");
+    }
+
+    #[test]
+    fn finish_installs_first_data_when_none_is_live() {
+        let d = tmp("finish-fresh");
+        put(d.join("update/ready"), "");
+        for f in REQUIRED_DATA {
+            put(d.join("update/data").join(f), "new");
+        }
+        assert!(finish(&d).unwrap());
+        assert!(d.join("data/refs/catalog.json").is_file());
+        assert!(!d.join("update").exists());
+    }
+
+    #[test]
+    fn finish_without_data_or_dll_just_cleans_up() {
+        let d = tmp("finish-exe-only");
+        put(d.join("update/ready"), "");
+        put(d.join("data/key.txt"), "old");
+        assert!(finish(&d).unwrap());
+        assert_eq!(std::fs::read_to_string(d.join("data/key.txt")).unwrap(), "old");
+        assert!(!d.join("update").exists());
+    }
+
+    #[test]
+    fn remove_dir_if_exists_reports_real_errors() {
+        let d = tmp("remove-dir");
+        assert!(remove_dir_if_exists(&d.join("missing")).is_ok());
+        put(d.join("file"), "x");
+        assert!(remove_dir_if_exists(&d.join("file")).is_err());
+        assert!(remove_dir_if_exists(&d).is_ok());
+        assert!(!d.exists());
+    }
+
+    #[test]
+    fn rename_retry_gives_up_after_ten_attempts() {
+        let d = tmp("rename-retry");
+        let err = rename_retry(&d.join("missing"), &d.join("to")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        put(d.join("a"), "1");
+        rename_retry(&d.join("a"), &d.join("b")).unwrap();
+        assert!(d.join("b").is_file());
+    }
+
+    #[test]
+    fn extract_unpacks_zip_and_rejects_non_zip() {
+        use std::io::Write;
+        let d = tmp("extract");
+        let zip_path = d.join("t.zip");
+        let mut w = zip::ZipWriter::new(File::create(&zip_path).unwrap());
+        w.start_file("ChadScanner/a.txt", zip::write::SimpleFileOptions::default()).unwrap();
+        w.write_all(b"hi").unwrap();
+        w.finish().unwrap();
+        extract(&zip_path, &d.join("out")).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join("out/ChadScanner/a.txt")).unwrap(), "hi");
+        put(d.join("bad.zip"), "not a zip");
+        assert!(extract(&d.join("bad.zip"), &d.join("out2")).is_err());
+        assert!(extract(&d.join("nope.zip"), &d.join("out3")).is_err());
+    }
 }

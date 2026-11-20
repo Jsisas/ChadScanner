@@ -167,7 +167,28 @@ Needs rustup, `lld` (`lld-link`), curl and unzip; the script installs the Window
 (the exe is locked while it runs).
 
 `cargo test` runs the platform-independent parts (data parsing, needs, progress store, log parsing, card
-layout) on Linux.
+layout) on Linux, plus the TarkovTracker client (`TrackerSource`, `test_token`, the `tasks-core` fetch) against a
+local scripted server (`src/testutil.rs`) that answers with every status the API documents.
+
+### Tests against the live TarkovTracker
+
+`.github/workflows/tarkovtracker-smoke.yml` runs daily (and on demand) against the real site, with no account: the
+API tests send a well-formed token that belongs to nobody, so the gateway answers 401 and nothing can be read or
+written; the browser tests visit as a signed-out visitor and only change that browser's throwaway local store.
+
+```
+cargo test -- --ignored live_                                  # API, openapi.json, tasks-core, site pages
+cd tests/live && npm ci && npx playwright install --with-deps chromium && npm test   # src/tracker.js on the live site
+```
+
+A failure there usually means TarkovTracker changed (an endpoint, a response field, a page selector the bridge
+uses), not ChadScanner.
+
+### Coverage
+
+CI (`test.yml`, job `coverage`) fails below 95 % branch coverage of the modules that build on Linux. Branch coverage
+needs nightly: `cargo +nightly llvm-cov --branch --ignore-filename-regex '(src/testutil\.rs|_tests\.rs|_live\.rs|/live\.rs)'`.
+The Windows-only code (`app.rs`, `settings.rs`, `win/`) and `tracker.js` are not measured.
 
 ### Release
 

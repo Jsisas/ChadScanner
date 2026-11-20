@@ -326,6 +326,8 @@ const SCAN_FRESH: Duration = Duration::from_secs(60);
 const READ_RESERVE: u32 = 100;
 /// A scan waits at most this long for the re-read; otherwise the last snapshot is shown.
 const SCAN_TIMEOUT: Duration = Duration::from_secs(2);
+/// Pause between ticks of the background thread.
+const TICK: Duration = Duration::from_secs(5);
 
 /// A write is confirmed against the server this long after the latest write.
 const SYNC_AFTER_WRITE: Duration = Duration::from_secs(30);
@@ -390,6 +392,8 @@ struct TrackerState {
 pub struct TrackerSource {
     mode: Mode,
     token: String,
+    /// API root without a trailing slash.
+    api: String,
     agent: ureq::Agent,
     pending_path: PathBuf,
     notify: Notify,
@@ -408,7 +412,12 @@ pub fn tracker_agent() -> anyhow::Result<ureq::Agent> {
 
 /// `GET /token`: (permissions, game mode) for a token, for the Settings `Test` button.
 pub fn test_token(token: &str) -> anyhow::Result<(Vec<String>, String)> {
-    let v: Value = tracker_agent()?.get(&format!("{API}/token")).set("Authorization", &format!("Bearer {token}")).call()?.into_json()?;
+    test_token_at(API, token)
+}
+
+/// `test_token` against another API root (the tests' local server).
+fn test_token_at(api: &str, token: &str) -> anyhow::Result<(Vec<String>, String)> {
+    let v: Value = tracker_agent()?.get(&format!("{api}/token")).set("Authorization", &format!("Bearer {token}")).call()?.into_json()?;
     let perms = v["permissions"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
     Ok((perms, v["gameMode"].as_str().unwrap_or("?").to_owned()))
 }
@@ -444,9 +453,38 @@ enum WriteError {
 
 impl TrackerSource {
     pub fn start(mode: Mode, token: String, pending_path: PathBuf, notify: Notify) -> anyhow::Result<Arc<TrackerSource>> {
-        let src = Arc::new(TrackerSource {
+        Self::start_at(API, mode, token, pending_path, notify, TICK)
+    }
+
+    /// `start` against another API root, polling every `tick`.
+    fn start_at(
+        api: &str,
+        mode: Mode,
+        token: String,
+        pending_path: PathBuf,
+        notify: Notify,
+        tick: Duration,
+    ) -> anyhow::Result<Arc<TrackerSource>> {
+        let src = Arc::new(Self::new(api, mode, token, pending_path, notify)?);
+        let weak: Weak<TrackerSource> = Arc::downgrade(&src);
+        std::thread::Builder::new().name(format!("tracker-{}", mode.key())).spawn(move || {
+            let mut last_poll: Option<std::time::Instant> = None;
+            loop {
+                let Some(src) = weak.upgrade() else { return };
+                src.poll(&mut last_poll);
+                drop(src);
+                std::thread::sleep(tick);
+            }
+        })?;
+        Ok(src)
+    }
+
+    /// A source that does not poll by itself.
+    fn new(api: &str, mode: Mode, token: String, pending_path: PathBuf, notify: Notify) -> anyhow::Result<TrackerSource> {
+        Ok(TrackerSource {
             mode,
             token,
+            api: api.trim_end_matches('/').to_owned(),
             agent: tracker_agent()?,
             pending_path,
             notify,
@@ -462,25 +500,21 @@ impl TrackerSource {
                 sync_at: None,
             }),
             queue_lock: Mutex::new(()),
-        });
-        let weak: Weak<TrackerSource> = Arc::downgrade(&src);
-        std::thread::Builder::new()
-            .name(format!("tracker-{}", mode.key()))
-            .spawn(move || {
-                let mut last_poll: Option<std::time::Instant> = None;
-                loop {
-                    let Some(src) = weak.upgrade() else { return };
-                    let sync_due = src.state.lock().unwrap().sync_at.is_some_and(|t| std::time::Instant::now() >= t);
-                    if sync_due || last_poll.is_none_or(|t| t.elapsed() >= POLL) {
-                        src.refresh();
-                        last_poll = Some(std::time::Instant::now());
-                    }
-                    src.flush_pending();
-                    drop(src);
-                    std::thread::sleep(Duration::from_secs(5));
-                }
-            })?;
-        Ok(src)
+        })
+    }
+
+    /// One tick of the background thread: reads when the poll interval or the post-write sync is due, then sends queued writes.
+    fn poll(&self, last_poll: &mut Option<std::time::Instant>) {
+        let sync_due = self.state.lock().unwrap().sync_at.is_some_and(|t| std::time::Instant::now() >= t);
+        if sync_due || last_poll.is_none_or(|t| t.elapsed() >= POLL) {
+            self.refresh();
+            *last_poll = Some(std::time::Instant::now());
+        }
+        self.flush_pending();
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("{}{path}", self.api)
     }
 
     fn auth(&self) -> String {
@@ -507,7 +541,7 @@ impl TrackerSource {
                 self.state.lock().unwrap().reads_left = Some(n);
             }
         };
-        let mut req = self.agent.get(&format!("{API}/progress")).set("Authorization", &self.auth()).timeout(timeout);
+        let mut req = self.agent.get(&self.url("/progress")).set("Authorization", &self.auth()).timeout(timeout);
         if let Some(e) = &etag {
             req = req.set("If-None-Match", e);
         }
@@ -554,7 +588,7 @@ impl TrackerSource {
     }
 
     fn post(&self, path: &str, body: &Value, what: &str) -> Result<(), WriteError> {
-        let res = self.agent.post(&format!("{API}{path}")).set("Authorization", &self.auth()).send_json(body.clone());
+        let res = self.agent.post(&self.url(path)).set("Authorization", &self.auth()).send_json(body.clone());
         let tag = format!("TarkovTracker {}: {what}", self.mode.key());
         match res {
             Ok(r) => {
@@ -793,7 +827,8 @@ mod tests {
         }
 
         let p = LocalSource::open(path, Mode::Pve).snapshot();
-        assert!(p.tasks["t1"].complete && !p.tasks["t1"].failed);
+        assert!(p.tasks["t1"].complete);
+        assert!(!p.tasks["t1"].failed);
         assert!(p.tasks["t2"].failed);
         assert_eq!(p.objectives["o1"].count, 3);
         assert_eq!(p.hideout_modules, HashSet::from(["st-1".to_owned(), "st-2".to_owned()]));
@@ -838,4 +873,169 @@ mod tests {
         assert_eq!(bad.len(), 1);
         assert!(bad[0].contains("objective o2: wrote complete=false count=1, server has complete=false count=0"), "{bad:?}");
     }
+
+    fn read_doc(path: &Path) -> Value {
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn backup(sections: Value) -> Value {
+        let mut doc = json!({"_format": FORMAT, "_version": 2});
+        for (k, v) in sections.as_object().unwrap() {
+            doc[k] = v.clone();
+        }
+        doc
+    }
+
+    #[test]
+    fn a_section_is_read_field_by_field() {
+        let p = parse_section(&json!({
+            "level": 31, "pmcFaction": "BEAR",
+            "traders": {"t": {"level": 3, "reputation": 0.25}, "u": {}},
+            "taskObjectives": {"o": {"complete": true, "count": 7.0}, "n": {"count": -4}},
+            "taskCompletions": {"c": {"complete": true, "failed": true}, "d": {}},
+            "hideoutModules": {"s-1": {"complete": true}, "s-2": {"complete": false}},
+            "hideoutParts": {"p": {"complete": true, "count": 2}},
+        }));
+        assert_eq!(p.traders["t"], TraderStanding { level: Some(3), reputation: Some(0.25) });
+        assert_eq!(p.traders["u"], TraderStanding::default());
+        assert_eq!(p.objectives["o"], ObjectiveProgress { complete: true, count: 7, invalid: false });
+        assert_eq!(p.objectives["n"].count, 0, "a negative count reads as 0");
+        assert_eq!(p.tasks["c"], TaskProgress { complete: true, failed: true, invalid: false });
+        assert_eq!(p.tasks["d"], TaskProgress::default());
+        assert_eq!(p.hideout_modules, HashSet::from(["s-1".to_owned()]));
+        assert_eq!(p.hideout_parts["p"], PartProgress { complete: true, count: 2 });
+        assert_eq!((p.level, p.faction.as_deref()), (Some(31), Some("BEAR")));
+    }
+
+    #[test]
+    fn level_and_faction_are_only_reported_when_real() {
+        for level in [json!(0), json!(256), json!(null), json!("9")] {
+            assert_eq!(parse_section(&json!({ "level": level })).level, None, "{level}");
+        }
+        assert_eq!(parse_section(&json!({"level": 255})).level, Some(255));
+        assert_eq!(parse_section(&json!({"pmcFaction": ""})).faction, None);
+        assert_eq!(parse_section(&json!({"pmcFaction": "BEAR", FACTION_UNSET: true})).faction, None, "a placeholder faction is hidden");
+        assert_eq!(parse_section(&json!({"pmcFaction": "BEAR", FACTION_UNSET: false})).faction.as_deref(), Some("BEAR"));
+        assert_eq!(parse_section(&json!(null)), Progress::default());
+    }
+
+    #[test]
+    fn a_json_file_in_another_format_is_moved_aside() {
+        let path = tmp("otherfmt");
+        std::fs::write(&path, r#"{"_format": "something-else"}"#).unwrap();
+        let s = LocalSource::open(path.clone(), Mode::Pve);
+        assert!(s.snapshot().tasks.is_empty());
+        assert!(!path.exists());
+        let moved = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().starts_with("progress.json.bad-"));
+        assert!(moved);
+    }
+
+    #[test]
+    fn import_replaces_the_store_with_a_backup() {
+        let path = tmp("import");
+        let s = LocalSource::open(path.clone(), Mode::Pvp);
+        s.set_task("old", TaskState::Completed).unwrap();
+        let file = path.with_file_name("backup.json");
+        let doc = backup(json!({"pvp": {"taskCompletions": {"new": {"complete": true}}, "level": 12}, "currentGameMode": "pve"}));
+        std::fs::write(&file, doc.to_string()).unwrap();
+        s.import(&file).unwrap();
+        let p = s.snapshot();
+        assert!(p.tasks.contains_key("new"));
+        assert!(!p.tasks.contains_key("old"));
+        assert_eq!(p.level, Some(12));
+        let on_disk = read_doc(&path);
+        assert_eq!(on_disk["currentGameMode"], "pvp", "the import is re-stamped for the mode in use");
+        for m in Mode::ALL {
+            assert!(on_disk[m.key()].is_object(), "{m:?} section is filled in so TarkovTracker accepts the file");
+        }
+    }
+
+    #[test]
+    fn import_refuses_what_is_not_a_backup_and_keeps_the_store() {
+        let path = tmp("importbad");
+        let s = LocalSource::open(path.clone(), Mode::Pve);
+        s.set_task("keep", TaskState::Completed).unwrap();
+        let file = path.with_file_name("backup.json");
+        assert!(s.import(&file).is_err(), "missing file");
+        std::fs::write(&file, "{nope").unwrap();
+        assert!(s.import(&file).is_err(), "not json");
+        std::fs::write(&file, r#"{"_format": "other"}"#).unwrap();
+        let e = s.import(&file).unwrap_err();
+        assert!(e.to_string().contains("not a TarkovTracker backup"), "{e:#}");
+        assert!(s.snapshot().tasks.contains_key("keep"));
+    }
+
+    #[test]
+    fn faction_is_stored_and_can_be_unset() {
+        let path = tmp("faction");
+        let s = LocalSource::open(path.clone(), Mode::Pve);
+        s.set_faction(Some("BEAR")).unwrap();
+        assert_eq!(s.snapshot().faction.as_deref(), Some("BEAR"));
+        assert_eq!(read_doc(&path)["pve"]["chadFactionUnset"], false);
+        s.set_faction(None).unwrap();
+        assert_eq!(s.snapshot().faction, None);
+        let sec = &read_doc(&path)["pve"];
+        assert_eq!((sec["pmcFaction"].as_str(), sec["chadFactionUnset"].as_bool()), (Some("USEC"), Some(true)));
+    }
+
+    #[test]
+    fn another_process_writing_the_file_is_picked_up_once() {
+        let path = tmp("reload");
+        let reader = LocalSource::open(path.clone(), Mode::Pve);
+        assert!(reader.snapshot().tasks.is_empty());
+        LocalSource::open(path.clone(), Mode::Pve).set_task("t", TaskState::Completed).unwrap();
+        reader.reload_if_changed();
+        let after = reader.snapshot();
+        assert!(after.tasks["t"].complete);
+        reader.reload_if_changed();
+        assert!(Arc::ptr_eq(&after, &reader.snapshot()), "an unchanged file is not parsed again");
+    }
+
+    #[test]
+    fn edits_repair_a_damaged_backup() {
+        let path = tmp("damaged");
+        std::fs::write(&path, backup(json!({"pve": 5, "pvp": {"taskCompletions": 3}})).to_string()).unwrap();
+        let pve = LocalSource::open(path.clone(), Mode::Pve);
+        assert_eq!(*pve.snapshot(), Progress::default());
+        pve.set_task("a", TaskState::Completed).unwrap();
+        let pvp = LocalSource::open(path.clone(), Mode::Pvp);
+        pvp.set_task("b", TaskState::Failed).unwrap();
+        let doc = read_doc(&path);
+        assert_eq!(doc["pve"]["taskCompletions"]["a"]["complete"], true);
+        assert_eq!(doc["pvp"]["taskCompletions"]["b"]["failed"], true, "a non-object collection is replaced");
+        assert!(doc["seasonal"].is_object(), "a missing section is added");
+    }
+
+    #[test]
+    fn an_objective_is_stored_with_its_count() {
+        let path = tmp("objective");
+        let s = LocalSource::open(path.clone(), Mode::Seasonal);
+        s.set_objective("o", true, 3).unwrap();
+        assert_eq!(s.snapshot().objectives["o"], ObjectiveProgress { complete: true, count: 3, invalid: false });
+        assert!(s.writes_objectives());
+        assert_eq!(read_doc(&path)["currentGameMode"], "seasonal");
+    }
+
+    #[test]
+    fn hideout_level_marks_every_level_up_to_it_and_clears_higher_ones() {
+        let path = tmp("hideout");
+        let s = LocalSource::open(path.clone(), Mode::Pve);
+        s.set_hideout_level("a", 3).unwrap();
+        s.set_hideout_level("b", 1).unwrap();
+        s.set_hideout_level("a", 1).unwrap();
+        let modules = &read_doc(&path)["pve"]["hideoutModules"];
+        let mut keys: Vec<_> = modules.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["a-1", "b-1"]);
+    }
 }
+
+#[cfg(test)]
+mod tracker_tests;
+
+/// Smoke tests against the live TarkovTracker API; `#[ignore]`d, run by the daily pipeline.
+#[cfg(test)]
+mod tracker_live;

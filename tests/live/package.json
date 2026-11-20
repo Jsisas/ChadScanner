@@ -1,0 +1,11 @@
+{
+  "name": "chadscanner-live-tests",
+  "private": true,
+  "description": "Smoke tests of the injected tarkovtracker.org bridge (src/tracker.js) in a headless browser against the live site, without an account.",
+  "scripts": {
+    "test": "node --test --test-timeout=300000 tracker-bridge.live.test.js"
+  },
+  "devDependencies": {
+    "playwright": "1.60.0"
+  }
+}

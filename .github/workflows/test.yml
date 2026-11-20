@@ -33,6 +33,50 @@ jobs:
         working-directory: ChadScanner
         run: cargo test
 
+  # Branch coverage of the modules that build on Linux (the Windows-only UI and tracker.js are not measured).
+  # Branch coverage is nightly-only; the live-network tests are `#[ignore]`d and do not run here.
+  coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      # Test support, not application code.
+      IGNORE: '(src/testutil\.rs|_tests\.rs|_live\.rs|/live\.rs)'
+      MIN_BRANCH_COVERAGE: 95
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ChadScanner
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Jsisas/ChadVision
+          ref: main
+          path: ChadVision
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage
+          workspaces: |
+            ChadScanner -> target
+            ChadVision -> target
+
+      - name: Branch coverage
+        working-directory: ChadScanner
+        run: |
+          cargo llvm-cov --branch --ignore-filename-regex "$IGNORE" --json --summary-only --output-path cov.json
+          cargo llvm-cov report --branch --ignore-filename-regex "$IGNORE"
+          pct=$(jq '.data[0].totals.branches.percent' cov.json)
+          echo "Branch coverage: ${pct}% (minimum ${MIN_BRANCH_COVERAGE}%)" | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -e --argjson min "$MIN_BRANCH_COVERAGE" '.data[0].totals.branches.percent >= $min' cov.json > /dev/null
+
   site:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

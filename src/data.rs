@@ -459,11 +459,7 @@ fn task_from_raw(r: RawTask, tasks_en: &HashMap<String, String>, chains: &mut Ha
     Task {
         name: tr(tasks_en, &r.name),
         min_player_level: r.min_player_level.unwrap_or(0),
-        task_requirements: r
-            .task_requirements
-            .into_iter()
-            .map(|t| TaskRequirement { task: t.task, status: t.status })
-            .collect(),
+        task_requirements: r.task_requirements.into_iter().map(|t| TaskRequirement { task: t.task, status: t.status }).collect(),
         trader_requirements: r
             .trader_requirements
             .into_iter()
@@ -506,8 +502,7 @@ impl Catalog {
         let traders_en = translations(body("traders_en")?)?;
 
         let mut items_data = data(body("items")?)?;
-        let raw_items: HashMap<String, RawItem> =
-            serde_json::from_value(items_data.get_mut("items").map(Value::take).unwrap_or_default())?;
+        let raw_items: HashMap<String, RawItem> = serde_json::from_value(items_data.get_mut("items").map(Value::take).unwrap_or_default())?;
         let items = raw_items
             .into_values()
             .map(|r| {
@@ -529,8 +524,7 @@ impl Catalog {
             .collect();
 
         let mut tasks_data = data(body("tasks")?)?;
-        let raw_tasks: HashMap<String, RawTask> =
-            serde_json::from_value(tasks_data.get_mut("tasks").map(Value::take).unwrap_or_default())?;
+        let raw_tasks: HashMap<String, RawTask> = serde_json::from_value(tasks_data.get_mut("tasks").map(Value::take).unwrap_or_default())?;
         let mut chains: HashMap<String, Vec<(f64, String)>> = HashMap::new();
         let mut tasks: HashMap<String, Task> = raw_tasks
             .into_values()
@@ -650,16 +644,33 @@ pub(crate) fn agent() -> anyhow::Result<ureq::Agent> {
         .build())
 }
 
-fn fetch_all(agent: &ureq::Agent, cache_dir: &Path, mode: Mode) -> anyhow::Result<Catalog> {
+/// Where the catalog comes from; the tests point both at a local server.
+struct Hosts {
+    tarkov_dev: String,
+    tracker: String,
+}
+
+impl Default for Hosts {
+    fn default() -> Hosts {
+        Hosts { tarkov_dev: "https://json.tarkov.dev".into(), tracker: "https://tarkovtracker.org".into() }
+    }
+}
+
+/// TarkovTracker's `tasks-core`: json.tarkov.dev's tasks plus the ones only its overlay has.
+fn tracker_tasks_url(host: &str, mode: Mode) -> String {
+    format!("{host}/api/tarkov/tasks-core?gameMode={}&lang=en", mode.api())
+}
+
+fn fetch_all(agent: &ureq::Agent, cache_dir: &Path, mode: Mode, hosts: &Hosts) -> anyhow::Result<Catalog> {
     let mut bodies = HashMap::new();
     for ep in ENDPOINTS {
-        let url = format!("https://json.tarkov.dev/{}/{ep}", mode.api());
+        let url = format!("{}/{}/{ep}", hosts.tarkov_dev, mode.api());
         let mut body = Vec::new();
         std::io::Read::read_to_end(&mut agent.get(&url).call()?.into_reader(), &mut body)?;
         bodies.insert(ep, body);
     }
     // Optional: tasks only TarkovTracker's overlay has. A failed or non-JSON response keeps the cached copy.
-    let url = format!("https://tarkovtracker.org/api/tarkov/tasks-core?gameMode={}&lang=en", mode.api());
+    let url = tracker_tasks_url(&hosts.tracker, mode);
     let fetched = (|| -> anyhow::Result<Vec<u8>> {
         let mut body = Vec::new();
         std::io::Read::read_to_end(&mut agent.get(&url).call()?.into_reader(), &mut body)?;
@@ -687,6 +698,18 @@ impl Store {
     /// Loads the cache now, then fetches in the background every 10 min (60 s after a failure).
     /// `on_missing` is called once when there is neither cache nor a successful first fetch.
     pub fn start(mode: Mode, cache_dir: PathBuf, on_missing: impl Fn() + Send + 'static) -> Arc<Store> {
+        Self::start_at(Hosts::default(), mode, cache_dir, on_missing, REFRESH, RETRY)
+    }
+
+    /// `start` against other hosts, waiting `refresh` after a fetch and `retry` after a failure.
+    fn start_at(
+        hosts: Hosts,
+        mode: Mode,
+        cache_dir: PathBuf,
+        on_missing: impl Fn() + Send + 'static,
+        refresh: Duration,
+        retry: Duration,
+    ) -> Arc<Store> {
         let cached = load_cached(&cache_dir, mode).map(Arc::new);
         if cached.is_some() {
             log::info!("{} data loaded from cache", mode.api());
@@ -703,11 +726,11 @@ impl Store {
                 let mut warned = false;
                 loop {
                     let Some(store) = weak.upgrade() else { return };
-                    let wait = match fetch_all(&agent, &cache_dir, mode) {
+                    let wait = match fetch_all(&agent, &cache_dir, mode, &hosts) {
                         Ok(c) => {
                             log::info!("{} data refreshed: {} items, {} tasks", mode.api(), c.items.len(), c.tasks.len());
                             *store.current.write().unwrap() = Some(Arc::new(c));
-                            REFRESH
+                            refresh
                         }
                         Err(e) => {
                             log::warn!("{} data fetch failed: {e:#}; retrying in 60 s", mode.api());
@@ -715,7 +738,7 @@ impl Store {
                                 warned = true;
                                 on_missing();
                             }
-                            RETRY
+                            retry
                         }
                     };
                     drop(store);
@@ -735,7 +758,7 @@ impl Store {
 mod tests {
     use super::*;
 
-    fn base() -> HashMap<&'static str, Vec<u8>> {
+    pub(super) fn base() -> HashMap<&'static str, Vec<u8>> {
         let mut b: HashMap<&str, Vec<u8>> = HashMap::new();
         b.insert("items", br#"{"data":{"items":{"a":{"id":"a","name":"a Name","shortName":"a ShortName","width":1,"height":2,"avg24hPrice":1001,"sellToTrader":[{"trader":"t1","priceRUB":10},{"trader":"t2","priceRUB":30}]}},"fleaMarket":{}}}"#.to_vec());
         b.insert("items_en", br#"{"data":{"a Name":"Alpha","a ShortName":"A"}}"#.to_vec());
@@ -745,7 +768,10 @@ mod tests {
         b.insert("hideout_en", br#"{"data":{"s_name":"Stash"}}"#.to_vec());
         b.insert("traders", br#"{"data":{"t1":{"id":"t1","name":"t1 Nickname"}}}"#.to_vec());
         b.insert("traders_en", br#"{"data":{"t1 Nickname":"Prapor"}}"#.to_vec());
-        b.insert("barters", br#"{"data":[{"trader":"t1","requiredItems":[{"item":"a","count":155.1}],"offeredItem":{"item":"b","count":1}}]}"#.to_vec());
+        b.insert(
+            "barters",
+            br#"{"data":[{"trader":"t1","requiredItems":[{"item":"a","count":155.1}],"offeredItem":{"item":"b","count":1}}]}"#.to_vec(),
+        );
         b.insert("crafts", br#"{"data":[{"requiredItems":[{"item":"a","count":1}],"productItem":{"item":"b"}}]}"#.to_vec());
         b
     }
@@ -815,7 +841,12 @@ mod tests {
         for task in [t("a", &[]), t("b", &["a"]), t("c", &["b"]), t("d", &["a"])] {
             c.tasks.insert(task.id.clone(), task);
         }
-        let lvl = |id: &str, level, req: Vec<(String, u8)>| StationLevel { id: id.into(), level, station_requirements: req, ..Default::default() };
+        let lvl = |id: &str, level, req: Vec<(String, u8)>| StationLevel {
+            id: id.into(),
+            level,
+            station_requirements: req,
+            ..Default::default()
+        };
         c.stations = vec![
             Station { id: "g".into(), levels: vec![lvl("g-1", 1, vec![]), lvl("g-2", 2, vec![])], ..Default::default() },
             Station { id: "w".into(), levels: vec![lvl("w-1", 1, vec![("g".into(), 2)])], ..Default::default() },
@@ -825,4 +856,59 @@ mod tests {
         // g-1 → g-2 → w-1
         assert_eq!((c.level_unlocks["g-1"], c.level_unlocks["g-2"]), (2, 1));
     }
+
+    #[test]
+    fn unlock_counts_survive_shared_dependents_cycles_and_unknown_stations() {
+        use crate::data::{Station, StationLevel, Task, TaskRequirement};
+        let mut c = Catalog::default();
+        let t = |id: &str, pre: &[&str]| Task {
+            id: id.into(),
+            task_requirements: pre.iter().map(|p| TaskRequirement { task: (*p).into(), status: vec![] }).collect(),
+            ..Default::default()
+        };
+        // d needs both b and c, which both need a: d is reachable from a along two paths and counted once.
+        // x and y need each other: a loop must not hang the walk.
+        for task in [t("a", &[]), t("b", &["a"]), t("c", &["a"]), t("d", &["b", "c"]), t("x", &["y"]), t("y", &["x"])] {
+            c.tasks.insert(task.id.clone(), task);
+        }
+        let lvl = |id: &str, level, req: Vec<(String, u8)>| StationLevel {
+            id: id.into(),
+            level,
+            station_requirements: req,
+            ..Default::default()
+        };
+        c.stations = vec![Station {
+            id: "s".into(),
+            levels: vec![lvl("s-1", 1, vec![("nope".into(), 9)]), lvl("s-2", 2, vec![("s".into(), 7)])],
+            ..Default::default()
+        }];
+        c.compute_unlocks();
+        assert_eq!(c.task_unlocks["a"], 3);
+        assert_eq!(c.task_unlocks["x"], 2, "a loop counts both members");
+        assert_eq!(c.level_unlocks["s-1"], 1, "a requirement on a station that does not exist adds no edge");
+        assert!(!c.level_unlocks.contains_key("s-2"));
+    }
+
+    #[test]
+    fn only_global_variable_requirements_with_a_variable_form_chains() {
+        let mut b = base();
+        b.insert(
+            "tasks",
+            br#"{"data":{"tasks":{"q":{"id":"q","name":"q name","otherRequirements":[
+                {"id":"x","type":"dialogue","variableId":"v","value":1},
+                {"id":"y","type":"GLOBALVARIABLE","variableId":"v2","value":4},
+                {"id":"z","type":"globalVariable","variableId":"","value":2}]}}}}"#
+                .to_vec(),
+        );
+        let c = Catalog::build(&b).unwrap();
+        assert_eq!(c.chains.len(), 1, "{:?}", c.chains);
+        assert_eq!(c.chains["v2"], vec![(4.0, "q".to_owned())], "the type is matched case-insensitively");
+    }
 }
+
+#[cfg(test)]
+mod fetch_tests;
+
+/// Smoke tests against the live TarkovTracker `tasks-core`; `#[ignore]`d, run by the daily pipeline.
+#[cfg(test)]
+mod tasks_core_live;

@@ -112,10 +112,17 @@ pub fn raid_end_script() -> &'static str {
 
 #[derive(Debug, PartialEq)]
 pub enum Message {
-    Toast { title: String, body: String, warn: bool },
+    Toast {
+        title: String,
+        body: String,
+        warn: bool,
+    },
     Log(String),
     /// Chad Fill clicked in the item popup for item `id`: what the popup showed.
-    Fill { id: String, popup: Popup },
+    Fill {
+        id: String,
+        popup: Popup,
+    },
     /// The site's own progress for its current game mode (`pvp`/`pve`/`seasonal`), by objective, hideout-part and hideout-module id.
     Progress {
         mode: String,
@@ -125,7 +132,9 @@ pub enum Message {
         modules: HashMap<String, bool>,
     },
     /// Quests hidden on tarkovtracker.org (account-wide): task ids.
-    Hidden { tasks: std::collections::HashSet<String> },
+    Hidden {
+        tasks: std::collections::HashSet<String>,
+    },
 }
 
 /// `{id: {count, complete}}` → `id → make(complete, count)`; missing fields read as 0 / false, a non-object as empty.
@@ -191,10 +200,7 @@ mod tests {
 
     #[test]
     fn parses_hidden_tasks() {
-        assert_eq!(
-            parse(r#"{"hidden":{"tasks":["a","b",3]}}"#),
-            Some(Message::Hidden { tasks: ["a".to_owned(), "b".to_owned()].into() })
-        );
+        assert_eq!(parse(r#"{"hidden":{"tasks":["a","b",3]}}"#), Some(Message::Hidden { tasks: ["a".to_owned(), "b".to_owned()].into() }));
         assert_eq!(parse(r#"{"hidden":{"tasks":[]}}"#), Some(Message::Hidden { tasks: Default::default() }));
         assert_eq!(parse(r#"{"hidden":{}}"#), None);
     }
@@ -235,10 +241,7 @@ mod tests {
 
     #[test]
     fn raid_extracts_script_passes_the_side() {
-        assert_eq!(
-            raid_extracts_script(&["A".into()], Some("pmc")),
-            r#"window.__chad&&__chad.raidExtracts(["A"],"pmc")"#
-        );
+        assert_eq!(raid_extracts_script(&["A".into()], Some("pmc")), r#"window.__chad&&__chad.raidExtracts(["A"],"pmc")"#);
         assert_eq!(raid_extracts_script(&[], None), r#"window.__chad&&__chad.raidExtracts([],null)"#);
     }
 
@@ -247,14 +250,20 @@ mod tests {
         let m = parse(
             r#"{"progress":{"mode":"pvp","objectives":{"o":{"count":2,"complete":true}},"parts":{"p":{"count":1}},"modules":{"s-1":{"complete":true},"s-2":{}}}}"#,
         );
-        let Some(Message::Progress { mode, objectives, parts, modules }) = m else { panic!("not a progress message: {m:?}") };
-        assert_eq!(mode, "pvp");
-        assert_eq!(objectives["o"], ObjectiveProgress { complete: true, count: 2, invalid: false });
-        assert_eq!(parts["p"], PartProgress { complete: false, count: 1 });
-        assert!(modules["s-1"]);
-        assert!(!modules["s-2"]);
+        assert_eq!(
+            m,
+            Some(Message::Progress {
+                mode: "pvp".into(),
+                objectives: HashMap::from([("o".to_owned(), ObjectiveProgress { complete: true, count: 2, invalid: false })]),
+                parts: HashMap::from([("p".to_owned(), PartProgress { complete: false, count: 1 })]),
+                modules: HashMap::from([("s-1".to_owned(), true), ("s-2".to_owned(), false)]),
+            })
+        );
         assert_eq!(parse(r#"{"progress":{"objectives":{}}}"#), None);
-        assert!(matches!(parse(r#"{"progress":{"mode":"pve"}}"#), Some(Message::Progress { objectives, .. }) if objectives.is_empty()));
+        assert_eq!(
+            parse(r#"{"progress":{"mode":"pve"}}"#),
+            Some(Message::Progress { mode: "pve".into(), objectives: HashMap::new(), parts: HashMap::new(), modules: HashMap::new() })
+        );
     }
 
     #[test]
@@ -315,4 +324,123 @@ mod tests {
             r#"window.__chad&&__chad.fill("a","Pliers",[{"find":null,"fir":false,"id":"p1","kind":"hideout","label":"Security 2","required":1}],[1],0,2)"#
         );
     }
+
+    fn target(kind: TargetKind, id: &str, find_id: Option<&str>) -> Target {
+        Target {
+            kind,
+            id: id.into(),
+            label: "L".into(),
+            required: 3,
+            count: 1,
+            remaining: 2,
+            fir: true,
+            find_id: find_id.map(str::to_owned),
+            find_count: 1,
+        }
+    }
+
+    #[test]
+    fn the_injected_script_carries_the_icon_and_no_placeholder() {
+        let s = script();
+        assert!(!s.contains("CHAD_ICON_SVG"), "the placeholder is filled in");
+        assert!(s.contains("<svg"), "the exe icon is embedded as a JS string");
+        assert!(s.contains("window.__chad"));
+    }
+
+    #[test]
+    fn open_script_quotes_id_and_name() {
+        assert_eq!(open_script("5c1", "Ivan \"Boss\" O'Neil"), r#"window.__chad&&__chad.open("5c1","Ivan \"Boss\" O'Neil")"#);
+    }
+
+    #[test]
+    fn step_script_names_the_kind_and_the_paired_find() {
+        let t = [target(TargetKind::Task, "o1", Some("f1")), target(TargetKind::Hideout, "p1", None)];
+        assert_eq!(
+            step_script("i", "N", false, &t),
+            r#"window.__chad&&__chad.step("i","N",false,[{"find":"f1","fir":true,"id":"o1","kind":"task","label":"L","required":3},{"find":null,"fir":true,"id":"p1","kind":"hideout","label":"L","required":3}])"#
+        );
+    }
+
+    #[test]
+    fn raid_scripts_pass_the_map_and_the_position() {
+        assert_eq!(raid_script("55f", 90.0), r#"window.__chad&&__chad.raid("55f",90)"#);
+        assert_eq!(raid_script("55f", -12.5), r#"window.__chad&&__chad.raid("55f",-12.5)"#);
+        assert_eq!(
+            raid_extracts_script(&["A \"b\"".into(), "C".into()], Some("scav")),
+            r#"window.__chad&&__chad.raidExtracts(["A \"b\"","C"],"scav")"#
+        );
+        assert_eq!(here_script(r#"{"pos":[1,2],"yaw":3}"#), r#"window.__chad&&__chad.here({"pos":[1,2],"yaw":3})"#);
+        assert_eq!(raid_show_script(), "window.__chad&&__chad.raidShow()");
+        assert_eq!(raid_end_script(), "window.__chad&&__chad.raidEnd()");
+    }
+
+    #[test]
+    fn every_script_is_a_no_op_before_the_page_script_has_loaded() {
+        let all = [
+            open_script("a", "b"),
+            mode_script("pve"),
+            level_script(1),
+            traders_script(&[]),
+            hideout_script(&[]),
+            raid_script("m", 0.0),
+            raid_extracts_script(&[], None),
+            here_script("null"),
+            raid_show_script().to_owned(),
+            raid_end_script().to_owned(),
+            step_script("a", "b", true, &[]),
+            fill_script("a", "b", &[], &[], 0, 0),
+        ];
+        for s in all {
+            assert!(s.starts_with("window.__chad&&__chad."), "{s}");
+        }
+    }
+
+    #[test]
+    fn malformed_page_messages_are_ignored() {
+        for msg in [
+            "not json",
+            r#"{"toast":{"title":1,"body":"B"}}"#,
+            r#"{"toast":{"title":"T"}}"#,
+            r#"{"progress":{"mode":5}}"#,
+            r#"{"fill":{"id":5}}"#,
+            r#"{"log":5}"#,
+            r#"[]"#,
+        ] {
+            assert_eq!(parse(msg), None, "{msg}");
+        }
+    }
+
+    #[test]
+    fn counts_clamp_and_default() {
+        let m = parse(
+            r#"{"progress":{"mode":"pve","objectives":{"neg":{"count":-3,"complete":true},"odd":{"count":"x","complete":"yes"},"plain":5},"parts":[1],"modules":{"m":{"complete":true}}}}"#,
+        );
+        assert_eq!(
+            m,
+            Some(Message::Progress {
+                mode: "pve".into(),
+                objectives: HashMap::from([
+                    ("neg".to_owned(), ObjectiveProgress { complete: true, count: 0, invalid: false }),
+                    ("odd".to_owned(), ObjectiveProgress::default()),
+                    ("plain".to_owned(), ObjectiveProgress::default()),
+                ]),
+                parts: HashMap::new(),
+                modules: HashMap::from([("m".to_owned(), true)]),
+            }),
+            "a non-object collection reads as empty"
+        );
+    }
+
+    #[test]
+    fn fill_rows_clamp_counts_and_skip_odd_rows() {
+        let m = parse(
+            r#"{"fill":{"id":"i","fir":-2,"nonFir":"x","rows":[{"kind":"task","group":"g","fir":"yes","count":-1},{"kind":5,"group":"g"},{"kind":"task","group":5}]}}"#,
+        );
+        let rows = vec![PopupRow { kind: TargetKind::Task, group: "g".into(), fir: false, count: 0 }];
+        assert_eq!(m, Some(Message::Fill { id: "i".into(), popup: Popup { fir: 0, non_fir: 0, rows } }));
+    }
 }
+
+/// Smoke tests against the live tarkovtracker.org; `#[ignore]`d, run by the daily pipeline.
+#[cfg(test)]
+mod live;

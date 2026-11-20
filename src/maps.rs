@@ -107,9 +107,7 @@ pub fn build(maps: &[u8], maps_en: &[u8], tarkov_dev: &[u8]) -> anyhow::Result<M
     let text = |key: &str| en[key].as_str().filter(|s| !s.is_empty()).map(str::to_owned);
     let mut by_scene = HashMap::new();
     for m in maps["maps"].as_object().context("no `data.maps`")?.values() {
-        let (Some(id), Some(scene), Some(normalized)) =
-            (m["id"].as_str(), m["scenePath"].as_str(), m["normalizedName"].as_str())
-        else {
+        let (Some(id), Some(scene), Some(normalized)) = (m["id"].as_str(), m["scenePath"].as_str(), m["normalizedName"].as_str()) else {
             continue;
         };
         let Some(config) = interactive_config(&tarkov_dev, normalized) else {
@@ -132,9 +130,7 @@ pub fn build(maps: &[u8], maps_en: &[u8], tarkov_dev: &[u8]) -> anyhow::Result<M
                 _ => f.2 = true,
             }
         }
-        let only = |want: (bool, bool, bool)| -> Vec<String> {
-            extracts.iter().filter(|n| factions[*n] == want).cloned().collect()
-        };
+        let only = |want: (bool, bool, bool)| -> Vec<String> { extracts.iter().filter(|n| factions[*n] == want).cloned().collect() };
         let (pmc_only, scav_only) = (only((true, false, false)), only((false, true, false)));
         let name = m["name"].as_str().and_then(text).unwrap_or_else(|| normalized.to_owned());
         let rotation = config["coordinateRotation"].as_f64().unwrap_or(0.0);
@@ -351,5 +347,23 @@ mod tests {
         assert_eq!(match_extracts(v, &gate, Some(Side::Scav)), gate);
         let gas = names(&["Old Gas Station"]);
         assert_eq!(match_extracts(v, &gas, Some(Side::Scav)), gas);
+    }
+
+    #[test]
+    fn locations_without_a_scene_and_extracts_without_a_name_are_skipped() {
+        let maps = r#"{"data":{"maps":{
+            "a":{"id":"a","normalizedName":"customs"},
+            "m1":{"id":"m1","name":"m1 Name","normalizedName":"customs","scenePath":"maps/customs_preset.bundle",
+              "extracts":[{"faction":"pmc"},{"name":"ex_trailer","faction":"pmc"}]}}}}"#;
+        let m = build(maps.as_bytes(), EN.as_bytes(), TD.as_bytes()).unwrap();
+        assert_eq!(m.by_scene.len(), 1);
+        assert_eq!(m.for_scene("maps/customs_preset.bundle").unwrap().extracts, vec!["Trailer Park"]);
+    }
+
+    #[test]
+    fn unusable_documents_fail_the_build() {
+        assert!(build(br#"{"data":{}}"#, EN.as_bytes(), TD.as_bytes()).is_err(), "no maps");
+        assert!(build(MAPS.as_bytes(), EN.as_bytes(), b"not json").is_err(), "tarkov.dev document unreadable");
+        assert!(build(b"{}", EN.as_bytes(), TD.as_bytes()).is_err(), "no data field");
     }
 }

@@ -1,0 +1,70 @@
+name: tarkovtracker-smoke
+
+# Daily check that the live TarkovTracker still looks the way ChadScanner expects. No account is used anywhere:
+# - the API tests send a well-formed token that belongs to nobody (the gateway answers 401: nothing is read or written),
+# - the page tests read public pages,
+# - the bridge tests visit as a signed-out browser, whose progress store is a throwaway local one.
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tarkovtracker-smoke
+  cancel-in-progress: false
+
+jobs:
+  api:
+    name: API, tasks-core and site pages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ChadScanner
+
+      # Keeps the `../ChadVision` path dependency working.
+      - uses: actions/checkout@v4
+        with:
+          repository: Jsisas/ChadVision
+          ref: main
+          path: ChadVision
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            ChadScanner -> target
+            ChadVision -> target
+
+      # The `live_` tests are `#[ignore]`d so the push/PR run stays offline.
+      - name: Live TarkovTracker smoke tests
+        working-directory: ChadScanner
+        run: cargo test -- --ignored live_
+
+  bridge:
+    name: tracker.js on the live site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/live/package-lock.json
+
+      - name: Install Playwright and Chromium
+        working-directory: tests/live
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Bridge smoke tests
+        working-directory: tests/live
+        run: npm test

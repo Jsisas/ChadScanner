@@ -324,4 +324,139 @@ mod tests {
             assert_eq!(Config::load(&p).tooltip_seconds, want, "{json}");
         }
     }
+
+    fn tmp_dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("chadscanner-test-{}-cfg-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn a_tooltip_time_that_overflows_means_no_timeout() {
+        let d = tmp_dir("overflow");
+        std::fs::write(d.join("config.json"), r#"{"tooltip_seconds":1e39}"#).unwrap();
+        assert_eq!(Config::load(&d.join("config.json")).tooltip_seconds, 0.0);
+    }
+
+    #[test]
+    fn config_round_trips_and_missing_or_broken_files_give_defaults() {
+        let d = tmp_dir("roundtrip");
+        let p = d.join("sub").join("config.json");
+        assert_eq!(Config::load(&p), Config::default(), "no file");
+        let mut c = Config {
+            mode: Mode::Seasonal,
+            source: Source::Tracker,
+            hotkey: Hotkey::Mouse4,
+            goal: Goal::Kappa,
+            max_rows: 9,
+            ..Config::default()
+        };
+        c.set_token(Mode::Seasonal, "SZN_abc").unwrap();
+        c.save(&p).unwrap();
+        assert_eq!(Config::load(&p), c);
+        std::fs::write(&p, "{broken").unwrap();
+        assert_eq!(Config::load(&p), Config::default(), "unreadable file");
+        std::fs::write(&p, r#"{"mode":"pvp","unknown":1}"#).unwrap();
+        let partial = Config::load(&p);
+        assert_eq!((partial.mode, partial.max_rows), (Mode::Pvp, 5), "missing keys take their defaults");
+    }
+
+    #[test]
+    fn tokens_are_kept_per_mode_trimmed_and_can_be_cleared() {
+        let mut c = Config::default();
+        for m in Mode::ALL {
+            assert_eq!(c.token(m), None);
+        }
+        c.set_token(Mode::Pvp, "  PVP_one \n").unwrap();
+        c.set_token(Mode::Pve, "PVE_two").unwrap();
+        c.set_token(Mode::Seasonal, "SZN_three").unwrap();
+        assert_eq!(
+            (c.token(Mode::Pvp).as_deref(), c.token(Mode::Pve).as_deref(), c.token(Mode::Seasonal).as_deref()),
+            (Some("PVP_one"), Some("PVE_two"), Some("SZN_three"))
+        );
+        assert!(!c.tokens.pve.contains("PVE"), "stored hex-encoded, not as text");
+        c.set_token(Mode::Pve, "").unwrap();
+        assert_eq!((c.token(Mode::Pve), c.token(Mode::Pvp).as_deref()), (None, Some("PVP_one")));
+    }
+
+    #[test]
+    fn an_undecodable_stored_token_reads_as_unset() {
+        let mut c = Config::default();
+        for stored in ["zz", "abc", "fffe"] {
+            c.tokens.pvp = stored.into();
+            assert_eq!(c.token(Mode::Pvp), None, "{stored}");
+        }
+    }
+
+    #[test]
+    fn modes_have_distinct_names_for_each_service() {
+        let rows = [
+            (Mode::Pvp, "regular", "pvp", "PvP"),
+            (Mode::Pve, "pve", "pve", "PvE"),
+            (Mode::Seasonal, "pvp-season", "seasonal", "Seasonal"),
+        ];
+        for (m, api, key, label) in rows {
+            assert_eq!((m.api(), m.key(), m.label()), (api, key, label));
+        }
+    }
+
+    #[test]
+    fn eft_session_names_map_to_modes() {
+        for (raw, want) in [
+            ("PvE", Some(Mode::Pve)),
+            ("Regular", Some(Mode::Pvp)),
+            ("pvp", Some(Mode::Pvp)),
+            ("PvPSeason", Some(Mode::Seasonal)),
+            ("SZN", Some(Mode::Seasonal)),
+            ("seasonal", Some(Mode::Seasonal)),
+            ("coop", None),
+            ("", None),
+        ] {
+            assert_eq!(Mode::from_session(raw), want, "{raw}");
+        }
+    }
+
+    #[test]
+    fn hotkeys_and_goals_have_labels() {
+        let labels: Vec<_> = Hotkey::ALL.iter().map(|h| h.label()).collect();
+        assert_eq!(labels, ["Shift + Left click", "Alt + Left click", "Middle click", "Mouse 4", "Mouse 5"]);
+        let goals: Vec<_> = Goal::ALL.iter().map(|g| g.label()).collect();
+        assert_eq!(goals, ["None", "Kappa", "Lightkeeper"]);
+    }
+
+    #[test]
+    fn files_live_under_the_app_data_folder() {
+        let p = Paths { install: "/i".into(), data: "/i/data".into(), appdata: "/a".into() };
+        let all = [
+            p.config(),
+            p.progress(),
+            p.pending(),
+            p.log(),
+            p.logstate(),
+            p.exfil_miss(),
+            p.player_miss(),
+            p.reports(),
+            p.tracker_window(),
+            p.webview(),
+            p.cache(),
+        ];
+        assert!(all.iter().all(|f| f.starts_with("/a")));
+        let mut names: Vec<_> = all.iter().map(|f| f.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), all.len(), "no two files share a name");
+        assert_eq!(p.pending().file_name().unwrap(), "pending.json");
+    }
+
+    #[test]
+    fn write_atomic_creates_folders_replaces_files_and_leaves_no_temp_file() {
+        let d = tmp_dir("atomic");
+        let f = d.join("a").join("b.json");
+        write_atomic(&f, b"one").unwrap();
+        write_atomic(&f, b"two").unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"two");
+        assert!(!f.with_extension("tmp").exists());
+        assert!(write_atomic(Path::new("/"), b"x").is_err(), "a path without a parent folder cannot be written");
+    }
 }

@@ -1,6 +1,6 @@
 //! The floating card: content from catalog + progress, rendered into a premultiplied pixmap.
-use crate::data::{Catalog, Item};
 use crate::config::Goal;
+use crate::data::{Catalog, Item};
 use crate::needs;
 use crate::progress::Progress;
 use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
@@ -547,7 +547,12 @@ pub fn render(card: &Card, fonts: &Fonts, scale: f32) -> Pixmap {
     paint.set_color(Color::from_rgba8(0x10, 0x10, 0x10, 235));
     let b = BORDER * s;
     // Clear the inside first so the background alpha is not composited over the border colour.
-    pix.fill_rect(Rect::from_xywh(b, b, width - 2.0 * b, height - 2.0 * b).unwrap(), &Paint { blend_mode: tiny_skia::BlendMode::Source, ..paint.clone() }, Transform::identity(), None);
+    pix.fill_rect(
+        Rect::from_xywh(b, b, width - 2.0 * b, height - 2.0 * b).unwrap(),
+        &Paint { blend_mode: tiny_skia::BlendMode::Source, ..paint.clone() },
+        Transform::identity(),
+        None,
+    );
 
     for l in &laid {
         match l.style {
@@ -602,7 +607,8 @@ mod tests {
         let cat = Catalog::default();
         let item = Item { id: "i".into(), short_name: "Shus".into(), width: 1, height: 1, ..Default::default() };
         let title = |s| show(&item_card(&cat, &item, s, &Progress::default(), &OPTS))[0].clone();
-        assert!(title(0.7).starts_with("Shus") && !title(0.7).starts_with("Shus ?"));
+        assert!(title(0.7).starts_with("Shus"));
+        assert!(!title(0.7).starts_with("Shus ?"));
         assert!(title(0.69).starts_with("Shus ?"));
     }
 
@@ -612,8 +618,16 @@ mod tests {
         assert_eq!(message("T", "b", TEXT).lines.len(), 2);
     }
 
-    const OPTS: CardOptions =
-        CardOptions { show_non_fir: true, max_rows: 10, quests: true, hideout: true, barters: true, crafts: true, smart: true, goal: Goal::None };
+    const OPTS: CardOptions = CardOptions {
+        show_non_fir: true,
+        max_rows: 10,
+        quests: true,
+        hideout: true,
+        barters: true,
+        crafts: true,
+        smart: true,
+        goal: Goal::None,
+    };
 
     /// Lines as `text | right`; separators omitted.
     fn show(c: &Card) -> Vec<String> {
@@ -643,7 +657,10 @@ mod tests {
         kappa.kappa_required = true;
         kappa.min_player_level = 30;
         cat.tasks.insert("k".into(), kappa);
-        cat.tasks.insert("s".into(), Task { id: "s".into(), name: "Side task".into(), objectives: vec![give("os", 4, true)], ..Default::default() });
+        cat.tasks.insert(
+            "s".into(),
+            Task { id: "s".into(), name: "Side task".into(), objectives: vec![give("os", 4, true)], ..Default::default() },
+        );
         let req = |id: &str, item: &str, count| HideoutRequirement { id: id.into(), item: item.into(), count, fir: false };
         let lvl = |id: &str, level, reqs| StationLevel { id: id.into(), level, item_requirements: reqs, ..Default::default() };
         cat.stations.push(Station {
@@ -675,7 +692,10 @@ mod tests {
         let pre = |id: &str, req: &[&str]| crate::data::Task {
             id: id.into(),
             name: id.into(),
-            task_requirements: req.iter().map(|r| crate::data::TaskRequirement { task: (*r).into(), status: vec!["complete".into()] }).collect(),
+            task_requirements: req
+                .iter()
+                .map(|r| crate::data::TaskRequirement { task: (*r).into(), status: vec!["complete".into()] })
+                .collect(),
             ..Default::default()
         };
         cat.tasks.insert("p1".into(), pre("p1", &[]));
@@ -842,13 +862,162 @@ mod tests {
         let (cat, item) = ordering_catalog();
         let o = CardOptions { quests: false, ..OPTS };
         let p = Progress { level: Some(16), ..Default::default() };
-        let popup = needs::Popup {
-            fir: 4,
-            non_fir: 3,
-            rows: vec![popup_row(Task, "s", true, 4), popup_row(Hideout, "b-1", false, 0)],
-        };
+        let popup = needs::Popup { fir: 4, non_fir: 3, rows: vec![popup_row(Task, "s", true, 4), popup_row(Hideout, "b-1", false, 0)] };
         let s = fill_scope(&cat, &item, &p, &o, &popup);
         assert_eq!(s.targets.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["b1"]);
         assert_eq!((s.fir, s.non_fir), (0, 3));
+    }
+
+    fn give_of(id: &str, item: &str, n: u32, fir: bool) -> crate::data::Objective {
+        crate::data::Objective {
+            id: id.into(),
+            kind: "giveItem".into(),
+            count: n,
+            found_in_raid: fir,
+            items: vec![item.into()],
+            ..Default::default()
+        }
+    }
+
+    fn plain_item(id: &str) -> Item {
+        Item { id: id.into(), short_name: "Shus".into(), width: 1, height: 1, ..Default::default() }
+    }
+
+    #[test]
+    fn locked_row_without_steps_or_levels_names_its_blocker_and_last_item() {
+        let item = plain_item("i");
+        let mut cat = Catalog::default();
+        let mut lk = crate::data::Task {
+            id: "lk".into(),
+            name: "Gated".into(),
+            objectives: vec![give_of("a", "i", 2, false), give_of("b", "x", 3, false)],
+            ..Default::default()
+        };
+        lk.lightkeeper_required = true;
+        cat.tasks.insert("lk".into(), lk);
+        let mut p = Progress { level: Some(10), ..Default::default() };
+        p.objectives.insert("b".into(), crate::progress::ObjectiveProgress { complete: true, count: 3, invalid: false });
+        assert_eq!(show(&item_card(&cat, &item, 0.9, &p, &OPTS))[2], "2×  Gated | Lightkeeper · last item");
+    }
+
+    #[test]
+    fn border_is_later_for_a_future_need_and_grey_when_only_outside_the_goal() {
+        let item = plain_item("i");
+        let mut cat = Catalog::default();
+        let mut future = crate::data::Task {
+            id: "f".into(),
+            name: "Future".into(),
+            objectives: vec![give_of("a", "i", 2, false)],
+            ..Default::default()
+        };
+        future.min_player_level = 40;
+        cat.tasks.insert("f".into(), future);
+        let p = Progress { level: Some(10), ..Default::default() };
+        assert_eq!(item_card(&cat, &item, 0.9, &p, &OPTS).border, LATER);
+        // Under a Kappa goal the non-Kappa task no longer counts as a reason to keep it.
+        let kappa = CardOptions { goal: Goal::Kappa, ..OPTS };
+        assert_eq!(item_card(&cat, &item, 0.9, &p, &kappa).border, GREY);
+    }
+
+    #[test]
+    fn footer_shows_flea_per_slot_trader_and_enabled_recipes() {
+        use crate::data::{Recipe, TraderPrice};
+        let mut cat = Catalog::default();
+        cat.traders.insert("t1".into(), "Therapist".into());
+        let recipe = || Recipe { required_items: vec!["i".into()] };
+        cat.barters = vec![recipe(), recipe()];
+        cat.crafts = vec![recipe()];
+        let item = Item {
+            id: "i".into(),
+            short_name: "Shus".into(),
+            width: 2,
+            height: 1,
+            avg24h: Some(20_000),
+            sell_to_trader: vec![
+                TraderPrice { trader: "t1".into(), price_rub: 15_000 },
+                TraderPrice { trader: "t2".into(), price_rub: 1_000 },
+            ],
+            ..Default::default()
+        };
+        let p = Progress::default();
+        let thin = "\u{2009}";
+        assert_eq!(
+            show(&item_card(&cat, &item, 0.9, &p, &OPTS))[1..],
+            [format!("Flea 20{thin}000 ₽  ·  10{thin}000 ₽/slot | Therapist 15{thin}000 ₽"), "Barters 2 · Crafts 1".to_string()]
+        );
+        // Recipes the settings hide (or that do not exist) leave no line.
+        let only_crafts = CardOptions { barters: false, ..OPTS };
+        assert_eq!(show(&item_card(&cat, &item, 0.9, &p, &only_crafts)).last().unwrap(), "Crafts 1");
+        let none = CardOptions { barters: false, crafts: false, ..OPTS };
+        assert_eq!(show(&item_card(&cat, &item, 0.9, &p, &none)).len(), 2);
+        // Trader price without a flea price, unknown trader name falls back to its id, no per-slot text for 1 slot.
+        let trader_only =
+            Item { avg24h: None, width: 1, sell_to_trader: vec![TraderPrice { trader: "t9".into(), price_rub: 500 }], ..item.clone() };
+        let c = item_card(&Catalog::default(), &trader_only, 0.9, &p, &OPTS);
+        assert_eq!(show(&c)[1..], ["t9 500 ₽"]);
+        // Flea only on a single slot has no per-slot suffix and no trader text.
+        let flea_only = Item { sell_to_trader: vec![], width: 1, ..item.clone() };
+        assert_eq!(show(&item_card(&Catalog::default(), &flea_only, 0.9, &p, &OPTS))[1..], [format!("Flea 20{thin}000 ₽")]);
+        // Crafts alone, with no prices, still get a rule and a line.
+        let bare = plain_item("i");
+        let c = item_card(&cat, &bare, 0.9, &p, &OPTS);
+        assert_eq!(c.lines.iter().map(|l| l.style).collect::<Vec<_>>(), [Style::Plain, Style::Rule, Style::Plain]);
+        assert_eq!(show(&c)[1], "Barters 2 · Crafts 1");
+    }
+
+    #[test]
+    fn fill_scope_covers_task_rows_the_popup_lists_and_charges_the_rest_to_the_pools() {
+        use needs::TargetKind::{Hideout, Task};
+        let (mut cat, item) = ordering_catalog();
+        let find = crate::data::Objective {
+            id: "ff".into(),
+            kind: "findItem".into(),
+            count: 2,
+            found_in_raid: true,
+            items: vec!["i".into()],
+            ..Default::default()
+        };
+        cat.tasks.insert(
+            "f".into(),
+            crate::data::Task {
+                id: "f".into(),
+                name: "Find and give".into(),
+                objectives: vec![find, give_of("fg", "i", 3, true)],
+                ..Default::default()
+            },
+        );
+        // A task whose only hand-in is a find has no popup row to fill.
+        cat.tasks.insert(
+            "fo".into(),
+            crate::data::Task {
+                id: "fo".into(),
+                name: "Find only".into(),
+                objectives: vec![crate::data::Objective {
+                    id: "fo1".into(),
+                    kind: "findItem".into(),
+                    count: 1,
+                    items: vec!["i".into()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        );
+        let o = CardOptions { hideout: false, ..OPTS };
+        let p = Progress { level: Some(40), ..Default::default() };
+        // Task "k" has no popup row, so it is never written; the popup's find row does not exist either.
+        let popup = needs::Popup {
+            fir: 9,
+            non_fir: 5,
+            rows: vec![
+                popup_row(Task, "s", true, 4),
+                popup_row(Task, "f", true, 3),
+                popup_row(Task, "gone", true, 2),
+                popup_row(Task, "fo", false, 1),
+                popup_row(Hideout, "zz", false, 1),
+            ],
+        };
+        let s = fill_scope(&cat, &item, &p, &o, &popup);
+        assert_eq!(s.targets.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["fg", "os"]);
+        assert_eq!((s.fir, s.non_fir), (7, 3));
     }
 }

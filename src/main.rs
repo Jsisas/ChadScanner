@@ -6,8 +6,8 @@
 mod card;
 mod config;
 mod data;
-mod eftlog;
 mod eftkeys;
+mod eftlog;
 mod exfil;
 mod maps;
 mod needs;
@@ -17,6 +17,9 @@ mod screenshot;
 mod secret;
 mod tracker;
 mod update;
+
+#[cfg(test)]
+mod testutil;
 
 #[cfg(windows)]
 mod app;
@@ -42,7 +45,10 @@ fn main() {
 #[cfg(windows)]
 fn load_fonts() -> anyhow::Result<card::Fonts> {
     let load = |names: &[&str]| {
-        names.iter().find_map(|n| std::fs::read(std::path::Path::new(r"C:\Windows\Fonts").join(n)).ok()).map(ab_glyph::FontArc::try_from_vec)
+        names
+            .iter()
+            .find_map(|n| std::fs::read(std::path::Path::new(r"C:\Windows\Fonts").join(n)).ok())
+            .map(ab_glyph::FontArc::try_from_vec)
     };
     let bold = load(&["segoeuib.ttf", "arialbd.ttf"])
         .ok_or_else(|| anyhow::anyhow!(r"neither C:\Windows\Fonts\segoeuib.ttf nor arialbd.ttf found"))??;

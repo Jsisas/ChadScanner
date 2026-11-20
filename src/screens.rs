@@ -333,8 +333,10 @@ mod tests {
         let t = active_tab(&fixture("screens-traders-nav-1440p.png"), SCALE).unwrap();
         let h = active_tab(&fixture("screens-hideout-nav-1440p.png"), SCALE).unwrap();
         eprintln!("tabs: {t:?} {h:?}");
-        assert!(t.0.abs_diff(1238) <= 8 && t.1.abs_diff(1392) <= 8, "{t:?}");
-        assert!(h.0.abs_diff(237) <= 8 && h.1.abs_diff(362) <= 8, "{h:?}");
+        assert!(t.0.abs_diff(1238) <= 8, "{t:?}");
+        assert!(t.1.abs_diff(1392) <= 8, "{t:?}");
+        assert!(h.0.abs_diff(237) <= 8, "{h:?}");
+        assert!(h.1.abs_diff(362) <= 8, "{h:?}");
     }
 
     #[test]
@@ -420,5 +422,221 @@ mod tests {
                 (got, want) => assert_eq!(got.is_some(), want.is_some(), "{f}: {got:?}"),
             }
         }
+    }
+
+    fn gray(w: u32, h: u32, v: u8) -> GrayImage {
+        GrayImage::from_pixel(w, h, image::Luma([v]))
+    }
+
+    fn fill_gray(g: &mut GrayImage, x0: u32, x1: u32, y0: u32, y1: u32, v: u8) {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                g.put_pixel(x, y, image::Luma([v]));
+            }
+        }
+    }
+
+    fn fill(img: &mut RgbImage, x0: u32, x1: u32, y0: u32, y1: u32, c: [u8; 3]) {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                img.put_pixel(x, y, Rgb(c));
+            }
+        }
+    }
+
+    #[test]
+    fn crops_clamp_to_the_image_and_report_empty() {
+        let img = RgbImage::from_pixel(10, 8, Rgb([10, 20, 30]));
+        assert_eq!(luma_crop(&img, -5, -5, 4, 3).unwrap().dimensions(), (4, 3));
+        assert_eq!(rgb_crop(&img, 6, 5, 50, 50).unwrap().dimensions(), (4, 3));
+        for (x0, y0, x1, y1) in [(10, 0, 20, 8), (0, 8, 10, 20), (-9, 0, -1, 8), (3, 3, 3, 6), (3, 3, 6, 3)] {
+            assert!(luma_crop(&img, x0, y0, x1, y1).is_none(), "luma {x0},{y0},{x1},{y1}");
+            assert!(rgb_crop(&img, x0, y0, x1, y1).is_none(), "rgb {x0},{y0},{x1},{y1}");
+        }
+    }
+
+    #[test]
+    fn median_of_nothing_is_zero() {
+        assert_eq!(median(&[]), 0);
+        assert_eq!(median(&[9, 1, 5]), 5);
+    }
+
+    #[test]
+    fn runs_close_at_the_end_of_input() {
+        assert_eq!(runs(Vec::<bool>::new().into_iter()), vec![]);
+        assert_eq!(runs([false, true, true, false, true].into_iter()), vec![(1, 3), (4, 5)]);
+        assert_eq!(runs([true, true].into_iter()), vec![(0, 2)]);
+    }
+
+    #[test]
+    fn active_tab_skips_short_light_runs() {
+        let light = [200, 200, 200];
+        let mut nav = RgbImage::new(300, 40);
+        assert_eq!(active_tab(&nav, 1.0), None);
+        fill(&mut nav, 10, 30, 6, 7, light); // 20 px: too short for a tab
+        assert_eq!(active_tab(&nav, 1.0), None);
+        fill(&mut nav, 100, 200, 6, 7, light);
+        assert_eq!(active_tab(&nav, 1.0), Some((100, 200)));
+        // A tab touching the right edge ends at the image width.
+        let mut edge = RgbImage::new(300, 40);
+        fill(&mut edge, 240, 300, 6, 7, light);
+        assert_eq!(active_tab(&edge, 1.0), Some((240, 300)));
+        // A short run at the edge alone is no tab.
+        let mut short = RgbImage::new(300, 40);
+        fill(&mut short, 250, 300, 6, 7, light);
+        assert_eq!(active_tab(&short, 1.0), None);
+        assert_eq!(active_tab(&RgbImage::new(300, 0), 1.0), None);
+    }
+
+    #[test]
+    fn tab_crop_needs_rows_inside_the_capture() {
+        assert!(tab_crop(&RgbImage::new(10, 2), 1.0, (0, 5)).is_none());
+        assert_eq!(tab_crop(&RgbImage::new(100, 40), 1.0, (10, 50)).unwrap().dimensions(), (40, 26));
+    }
+
+    #[test]
+    fn screen_of_matches_labels_and_rejects_noise() {
+        assert_eq!(screen_of("TRADERS"), Some(Screen::Traders));
+        assert_eq!(screen_of("Traders"), Some(Screen::Traders));
+        assert_eq!(screen_of("HIDEOUT"), Some(Screen::Hideout));
+        assert_eq!(screen_of("H1DEOUT"), Some(Screen::Hideout));
+        assert_eq!(screen_of("CHARACTER"), None);
+        assert_eq!(screen_of(""), None);
+    }
+
+    #[test]
+    fn badge_level_counts_numeral_strokes() {
+        // Too small to hold a badge.
+        assert_eq!(badge_level(&gray(7, 20, 200)), None);
+        assert_eq!(badge_level(&gray(20, 7, 200)), None);
+        // Dark badge face (median below 150).
+        assert_eq!(badge_level(&gray(21, 20, 100)), None);
+        // Blank light badge: no strokes.
+        assert_eq!(badge_level(&gray(21, 20, 200)), None);
+        for (cols, want) in [(vec![9], 1), (vec![6, 11], 2), (vec![4, 9, 14], 3)] {
+            let mut g = gray(21, 20, 200);
+            for c in &cols {
+                fill_gray(&mut g, *c, c + 2, 0, 20, 20);
+            }
+            assert_eq!(badge_level(&g), Some(want), "{cols:?}");
+        }
+        // Four strokes is not a numeral.
+        let mut g = gray(21, 20, 200);
+        for c in [3, 7, 11, 15] {
+            fill_gray(&mut g, c, c + 2, 0, 20, 20);
+        }
+        assert_eq!(badge_level(&g), None);
+        // A broad dark band (the crown's base) is level 4.
+        let mut crown = gray(21, 20, 200);
+        fill_gray(&mut crown, 0, 21, 8, 16, 20);
+        assert_eq!(badge_level(&crown), Some(4));
+        // A thin dark line is wide but too little ink to be a crown, and no vertical stroke either.
+        let mut line = gray(21, 20, 200);
+        fill_gray(&mut line, 2, 19, 10, 11, 20);
+        assert_eq!(badge_level(&line), None);
+    }
+
+    #[test]
+    fn player_level_rejects_bad_captures_and_numbers() {
+        let img = RgbImage::from_pixel(65, 63, Rgb([200, 200, 200]));
+        assert_eq!(player_level(&RgbImage::new(0, 0), |_| panic!("OCR on empty")), Err("empty capture".into()));
+        assert!(player_level(&img, |_| String::new()).is_err());
+        assert!(player_level(&img, |_| "123".into()).unwrap_err().starts_with("OCR"));
+        assert_eq!(player_level(&img, |_| "00".into()), Err("level 0 out of range".into()));
+        assert_eq!(player_level(&img, |_| "80".into()), Err("level 80 out of range".into()));
+        assert_eq!(player_level(&img, |_| "79".into()), Ok(79));
+        // OCR sees only the digit face, inset from the badge border.
+        assert_eq!(player_level(&img, |face| format!("{}x{}", face.width(), face.height()).replace('x', "")), Err("OCR \"4139\"".into()));
+    }
+
+    #[test]
+    fn traders_skips_unreadable_portraits() {
+        // Capture too small to hold any portrait.
+        assert!(traders(&RgbImage::new(10, 10), 1.0, |_| panic!("OCR on a tiny capture")).is_empty());
+        // Wide enough for the portrait strip but not its icon core.
+        assert!(traders(&RgbImage::new(25, 150), 1.0, |_| panic!("OCR with no core")).is_empty());
+    }
+
+    /// A first-portrait capture: light background, inked icon core, and a badge with `strokes` dark columns.
+    fn portrait(bg: u8, strokes: &[u32]) -> RgbImage {
+        let mut img = RgbImage::from_pixel(140, 150, Rgb([bg, bg, bg]));
+        fill(&mut img, 35, 45, 125, 135, [0, 0, 0]);
+        for x in strokes {
+            fill(&mut img, 15 + x, 17 + x, 5, 25, [10, 10, 10]);
+        }
+        img
+    }
+
+    #[test]
+    fn traders_reads_level_and_name_and_drops_blank_names() {
+        let img = portrait(200, &[9]);
+        assert_eq!(traders(&img, 1.0, |_| " Prapor ".into()), vec![TraderRead { name: "Prapor".into(), level: 1 }]);
+        assert!(traders(&img, 1.0, |_| "  ".into()).is_empty());
+        // Dark badge background: level unreadable, no OCR.
+        assert!(traders(&portrait(100, &[9]), 1.0, |_| panic!("OCR with unreadable badge")).is_empty());
+        // No inked core: a locked portrait.
+        let locked = RgbImage::from_pixel(140, 150, Rgb([200, 200, 200]));
+        assert!(traders(&locked, 1.0, |_| panic!("OCR on a locked portrait")).is_empty());
+    }
+
+    const RED: [u8; 3] = [200, 30, 30];
+
+    /// A 1x-scale detail capture: red close button from row 10, then optional white text lines.
+    fn panel(h: u32, lines: &[(u32, u32)]) -> RgbImage {
+        let mut img = RgbImage::new(920, h);
+        fill(&mut img, 870, 890, 10, 30, RED);
+        for &(y0, y1) in lines {
+            fill(&mut img, 100, 200, y0, y1, [230, 230, 230]);
+        }
+        img
+    }
+
+    fn scripted(answers: &[&str]) -> impl Fn(&RgbImage) -> String {
+        let q = std::cell::RefCell::new(answers.iter().map(|s| s.to_string()).collect::<std::collections::VecDeque<_>>());
+        move |_| q.borrow_mut().pop_front().expect("unexpected extra OCR call")
+    }
+
+    #[test]
+    fn detail_close_button_must_be_red_enough() {
+        let mut img = RgbImage::new(920, 60);
+        fill(&mut img, 870, 890, 10, 20, [60, 60, 60]); // reddish only in the r >= 55 test, not r - g
+        fill(&mut img, 870, 890, 20, 30, [100, 50, 90]); // r - g ok, r - b too small
+        fill(&mut img, 870, 890, 30, 40, [40, 0, 0]); // too dark
+        fill(&mut img, 870, 880, 40, 50, RED); // only 10 px wide
+        assert_eq!(detail(&img, 1.0, |_| panic!("OCR without a close button")), None);
+    }
+
+    #[test]
+    fn detail_reads_name_and_level() {
+        let img = panel(200, &[(30, 42), (50, 62)]);
+        let got = detail(&img, 1.0, scripted(&["Vents", "Requirements", "02"])).unwrap();
+        assert_eq!(got, StationRead { name: "Vents".into(), level: 2 });
+        // A single text line still reads its icon number.
+        let one = panel(200, &[(30, 42)]);
+        assert_eq!(detail(&one, 1.0, scripted(&["Gym", "05"])).unwrap().level, 5);
+    }
+
+    #[test]
+    fn detail_locked_station_is_level_zero_without_reading_the_icon() {
+        let img = panel(200, &[(30, 42), (50, 62)]);
+        let got = detail(&img, 1.0, scripted(&["Gym", "Locked"])).unwrap();
+        assert_eq!(got, StationRead { name: "Gym".into(), level: 0 });
+    }
+
+    #[test]
+    fn detail_rejects_unreadable_panels() {
+        let two = panel(200, &[(30, 42), (50, 62)]);
+        // Blank name.
+        assert_eq!(detail(&two, 1.0, scripted(&["  "])), None);
+        // Icon digits that are not a two-digit level 1-9.
+        for digits in ["2", "10", "00", "ab", ""] {
+            assert_eq!(detail(&two, 1.0, scripted(&["Gym", "Requirements", digits])), None, "{digits:?}");
+        }
+        // No title text under the button.
+        assert_eq!(detail(&panel(200, &[]), 1.0, |_| panic!("OCR without text")), None);
+        // Text lines of implausible height (3 px, 40 px) are not title lines.
+        assert_eq!(detail(&panel(200, &[(30, 33), (50, 90)]), 1.0, |_| panic!("OCR on noise")), None);
+        // Capture ends above the icon number's rows.
+        assert_eq!(detail(&panel(50, &[(30, 42)]), 1.0, scripted(&["Gym"])), None);
     }
 }

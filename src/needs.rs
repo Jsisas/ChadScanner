@@ -420,14 +420,16 @@ pub fn quest_needs(cat: &Catalog, item_id: &str, p: &Progress, show_non_fir: boo
         _ => 2,
     };
     n.tasks.sort_by(|a, b| {
-        rank(a).cmp(&rank(b)).then_with(|| {
-            if rank(a) < 2 {
-                b.count.cmp(&a.count)
-            } else {
-                a.missing_prereqs.cmp(&b.missing_prereqs).then(a.min_level.cmp(&b.min_level))
-            }
-        })
-        .then(a.name.cmp(&b.name))
+        rank(a)
+            .cmp(&rank(b))
+            .then_with(|| {
+                if rank(a) < 2 {
+                    b.count.cmp(&a.count)
+                } else {
+                    a.missing_prereqs.cmp(&b.missing_prereqs).then(a.min_level.cmp(&b.min_level))
+                }
+            })
+            .then(a.name.cmp(&b.name))
     });
     n
 }
@@ -535,9 +537,7 @@ pub fn next_fill(targets: &[Target], overfill_fir: bool) -> Option<&Target> {
 
 /// Arrow Down's target: `preferred` (the last raised) while it has a count, else the last with a count.
 pub fn next_unfill<'a>(targets: &'a [Target], preferred: Option<&str>) -> Option<&'a Target> {
-    preferred
-        .and_then(|id| targets.iter().find(|t| t.id == id && t.count > 0))
-        .or_else(|| targets.iter().rev().find(|t| t.count > 0))
+    preferred.and_then(|id| targets.iter().find(|t| t.id == id && t.count > 0)).or_else(|| targets.iter().rev().find(|t| t.count > 0))
 }
 
 /// One need row of TarkovTracker's item popup: its task (`Task`) or station level (`Hideout`) id, whether it
@@ -776,6 +776,9 @@ mod tests {
         let mut p = known();
         p.faction = None;
         assert_eq!(quest_needs(&c, ITEM, &p, true).conditional, 2);
+        // The player's own faction (any case) keeps the task open.
+        p.faction = Some("bear".into());
+        assert_eq!(quest_needs(&c, ITEM, &p, true).current, 2);
     }
 
     #[test]
@@ -810,6 +813,9 @@ mod tests {
         let c = catalog(vec![task("t", vec![obj("g", "giveItem", 2, false), obj("p", "plantItem", 1, false)])]);
         assert_eq!(quest_needs(&c, ITEM, &known(), true).current, 3);
         assert_eq!(quest_needs(&c, ITEM, &known(), false).current, 0);
+        // A FIR hand-in still counts when non-FIR is hidden.
+        let fir = catalog(vec![task("t", vec![obj("g", "giveItem", 2, true)])]);
+        assert_eq!(quest_needs(&fir, ITEM, &known(), false).current_fir, 2);
     }
 
     #[test]
@@ -1000,5 +1006,495 @@ mod tests {
         assert_eq!(distribute(&order, 3, 0, false), (vec![0, 2], 1, 0));
         assert_eq!(distribute(&order, 0, 5, true), (vec![1, 0], 0, 4));
         assert_eq!(distribute(&order, 0, 0, true), (vec![0, 0], 0, 0));
+    }
+
+    fn prog(complete: bool, count: u32) -> ObjectiveProgress {
+        ObjectiveProgress { complete, count, invalid: false }
+    }
+
+    fn req(task: &str, status: &[&str]) -> TaskRequirement {
+        TaskRequirement { task: task.into(), status: status.iter().map(|s| s.to_string()).collect() }
+    }
+
+    fn trader_req(kind: &str, method: &str, value: f64) -> TraderRequirement {
+        TraderRequirement { trader: "Tr".into(), requirement_type: kind.into(), compare_method: method.into(), value }
+    }
+
+    fn standing(level: Option<u32>, reputation: Option<f64>) -> crate::progress::TraderStanding {
+        crate::progress::TraderStanding { level, reputation }
+    }
+
+    #[test]
+    fn other_objectives_done_ignores_item_optional_and_invalid_objectives() {
+        let mut marker = obj("m", "mark", 1, false);
+        marker.items.clear();
+        marker.marker_item = Some(ITEM.into());
+        let mut build = obj("b", "buildWeapon", 1, false);
+        build.items.clear();
+        build.build_item = Some(ITEM.into());
+        let mut optional = obj("o", "visit", 1, false);
+        optional.optional = true;
+        let mut visit = obj("v", "visit", 0, false);
+        visit.items.clear();
+        let mut shoot = obj("s", "shoot", 4, false);
+        shoot.items.clear();
+        let mut extract = obj("e", "extract", 2, false);
+        extract.items.clear();
+        let t = task("t", vec![obj("g", "giveItem", 1, false), marker, build, optional, visit, shoot, extract]);
+        assert_eq!(other_objectives_done(&t, ITEM, &known()), Some(0.0));
+        let mut p = known();
+        p.objectives.insert("v".into(), prog(true, 0));
+        p.objectives.insert("s".into(), prog(false, 9));
+        p.objectives.insert("e".into(), ObjectiveProgress { complete: true, count: 2, invalid: true });
+        // visit counts 1/1 (zero-count objective needs 1), shoot is clamped to 4/4, invalid extract is 0/2.
+        assert_eq!(other_objectives_done(&t, ITEM, &p), Some(5.0 / 7.0));
+        let only_item = task("t", vec![obj("g", "giveItem", 1, false)]);
+        assert_eq!(other_objectives_done(&only_item, ITEM, &p), None);
+    }
+
+    #[test]
+    fn quest_need_reports_other_objective_progress_and_unlock_count() {
+        let mut t = task(
+            "t",
+            vec![obj("g", "giveItem", 1, false), Objective { id: "k".into(), kind: "shoot".into(), count: 2, ..Default::default() }],
+        );
+        t.lightkeeper_required = true;
+        let mut c = catalog(vec![t]);
+        c.task_unlocks.insert("t".into(), 7);
+        let mut p = known();
+        p.objectives.insert("k".into(), prog(false, 1));
+        let n = quest_needs(&c, ITEM, &p, true);
+        // A recorded non-item objective proves the task was started, so it is active despite the Lightkeeper gate.
+        let need = &n.tasks[0];
+        assert_eq!((need.gate, need.other_done, need.unlocks, need.lightkeeper), (Gate::Active, Some(0.5), 7, true));
+    }
+
+    #[test]
+    fn task_failed_or_invalid_progress_is_not_complete_and_all_objectives_done_is() {
+        let t = task("t", vec![obj("a", "giveItem", 1, false), obj("b", "visit", 1, false)]);
+        let mut p = known();
+        assert!(!task_complete(&t, &p));
+        p.objectives.insert("a".into(), prog(true, 1));
+        assert!(!task_complete(&t, &p));
+        p.objectives.insert("b".into(), prog(true, 1));
+        assert!(task_complete(&t, &p));
+        p.tasks.insert("t".into(), TaskProgress { failed: true, ..Default::default() });
+        assert!(!task_complete(&t, &p));
+        // An invalid tracker entry is ignored, so the objectives decide.
+        p.tasks.insert("t".into(), TaskProgress { failed: true, invalid: true, ..Default::default() });
+        assert!(task_complete(&t, &p));
+        p.tasks.insert("t".into(), TaskProgress { complete: true, ..Default::default() });
+        p.objectives.clear();
+        assert!(task_complete(&t, &p));
+        // A tracker entry that is neither failed nor complete falls through to objectives.
+        p.tasks.insert("t".into(), TaskProgress::default());
+        assert!(!task_complete(&t, &p));
+        assert!(!task_complete(&task("empty", vec![]), &p));
+        // Optional objectives never count; a task of only optional objectives is never complete.
+        let mut opt = obj("o", "visit", 1, false);
+        opt.optional = true;
+        assert!(!task_complete(&task("only-opt", vec![opt]), &p));
+        // An invalid objective entry never counts as complete.
+        p.objectives.insert("a".into(), ObjectiveProgress { complete: true, count: 1, invalid: true });
+        p.objectives.insert("b".into(), prog(true, 1));
+        assert!(!task_complete(&t, &p));
+    }
+
+    #[test]
+    fn task_shows_progress_needs_a_non_item_objective_and_an_unfinished_task() {
+        let t = task(
+            "t",
+            vec![
+                obj("g", "giveItem", 1, false),
+                obj("p", "plantItem", 1, false),
+                obj("f", "findItem", 1, false),
+                obj("v", "visit", 1, false),
+            ],
+        );
+        let mut p = known();
+        for id in ["g", "p", "f"] {
+            p.objectives.insert(id.into(), prog(false, 1));
+        }
+        assert!(!task_shows_progress(&t, &p));
+        p.objectives.insert("v".into(), ObjectiveProgress { complete: false, count: 1, invalid: true });
+        assert!(!task_shows_progress(&t, &p));
+        p.objectives.insert("v".into(), prog(false, 1));
+        assert!(task_shows_progress(&t, &p));
+        for done in [
+            TaskProgress { complete: true, ..Default::default() },
+            TaskProgress { failed: true, ..Default::default() },
+            TaskProgress { invalid: true, ..Default::default() },
+        ] {
+            p.tasks.insert("t".into(), done);
+            assert!(!task_shows_progress(&t, &p));
+        }
+        p.tasks.insert("t".into(), TaskProgress::default());
+        assert!(task_shows_progress(&t, &p));
+    }
+
+    fn gate_of(requirements: Vec<TaskRequirement>, cat_extra: Vec<Task>, p: &Progress) -> (Gate, Option<u32>) {
+        let mut t = task("t", vec![obj("g", "giveItem", 1, false)]);
+        t.task_requirements = requirements;
+        let mut all = cat_extra;
+        all.push(t.clone());
+        classify_gate(&t, &catalog(all), p)
+    }
+
+    #[test]
+    fn prerequisite_end_states_decide_the_gate() {
+        let done = |complete, failed| TaskProgress { complete, failed, invalid: false };
+        let with = |id: &str, tp: TaskProgress| {
+            let mut p = known();
+            p.tasks.insert(id.into(), tp);
+            p
+        };
+        // Completed prerequisite satisfies "complete" (case-insensitive) and passes unverifiable "active".
+        assert_eq!(gate_of(vec![req("pre", &["Complete"])], vec![], &with("pre", done(true, false))).0, Gate::Applicable);
+        assert_eq!(gate_of(vec![req("pre", &["active"])], vec![], &with("pre", done(true, false))).0, Gate::Applicable);
+        // Completed when only "failed" was wanted kills the task.
+        assert_eq!(gate_of(vec![req("pre", &["failed"])], vec![], &with("pre", done(true, false))).0, Gate::NotApplicable);
+        // Failed prerequisite: ok when "failed" is accepted, dead otherwise.
+        assert_eq!(gate_of(vec![req("pre", &["failed"])], vec![], &with("pre", done(false, true))).0, Gate::Applicable);
+        assert_eq!(gate_of(vec![req("pre", &["complete"])], vec![], &with("pre", done(false, true))).0, Gate::NotApplicable);
+        // Active-only prerequisite: satisfied only by recorded progress on the prerequisite.
+        let pre = task("pre", vec![obj("pv", "visit", 1, false)]);
+        let mut p = known();
+        assert_eq!(gate_of(vec![req("pre", &["active"])], vec![pre.clone()], &p).0, Gate::Applicable);
+        p.objectives.insert("pv".into(), prog(false, 1));
+        assert_eq!(gate_of(vec![req("pre", &["active"])], vec![pre], &p).0, Gate::Applicable);
+        // "active"+"complete" and an unknown prerequisite with active status are not locked by a known gate.
+        assert_eq!(gate_of(vec![req("ghost", &["active"])], vec![], &known()).0, Gate::Applicable);
+        assert_eq!(gate_of(vec![req("ghost", &["active", "complete"])], vec![], &known()).0, Gate::Future);
+        assert_eq!(gate_of(vec![req("ghost", &["active", "failed"])], vec![], &known()).0, Gate::Future);
+        assert_eq!(gate_of(vec![req("ghost", &["complete"])], vec![], &known()).0, Gate::Future);
+    }
+
+    #[test]
+    fn level_gate_unknown_player_level_is_conditional_and_met_level_is_open() {
+        let mut t = task("t", vec![obj("g", "giveItem", 1, false)]);
+        t.min_player_level = 10;
+        let c = catalog(vec![t.clone()]);
+        assert_eq!(classify_gate(&t, &c, &known()), (Gate::Applicable, None));
+        let mut p = known();
+        p.level = None;
+        assert_eq!(classify_gate(&t, &c, &p), (Gate::Conditional, None));
+        p.level = Some(9);
+        assert_eq!(classify_gate(&t, &c, &p), (Gate::Future, Some(10)));
+    }
+
+    #[test]
+    fn trader_requirements_compare_level_or_reputation() {
+        let gate = |r: TraderRequirement, p: &Progress| {
+            let mut t = task("t", vec![obj("g", "giveItem", 1, false)]);
+            t.trader_requirements = vec![r];
+            classify_gate(&t, &catalog(vec![t.clone()]), p).0
+        };
+        let with = |s| {
+            let mut p = known();
+            p.traders.insert("tr".into(), s);
+            p
+        };
+        // Unknown requirement type is conditional; unreported trader or missing reputation is met.
+        assert_eq!(gate(trader_req("loyalty", ">=", 1.0), &known()), Gate::Conditional);
+        assert_eq!(gate(trader_req("Level", ">=", 4.0), &known()), Gate::Applicable);
+        assert_eq!(gate(trader_req("reputation", ">=", 0.5), &with(standing(Some(1), None))), Gate::Applicable);
+        assert_eq!(gate(trader_req("level", ">=", 2.0), &with(standing(None, Some(0.1)))), Gate::Applicable);
+        // Reputation comparisons, trader id matched case-insensitively.
+        let rep = with(standing(Some(1), Some(0.5)));
+        for (method, value, want) in [
+            (">=", 0.5, Gate::Applicable),
+            (">=", 0.6, Gate::Future),
+            (">", 0.5, Gate::Future),
+            (">", 0.4, Gate::Applicable),
+            ("<=", 0.5, Gate::Applicable),
+            ("<=", 0.4, Gate::Future),
+            ("<", 0.6, Gate::Applicable),
+            ("<", 0.5, Gate::Future),
+            ("==", 0.5, Gate::Applicable),
+            ("=", 0.5, Gate::Applicable),
+            ("=", 0.4, Gate::Future),
+            ("!=", 0.4, Gate::Future),
+        ] {
+            assert_eq!(gate(trader_req("reputation", method, value), &rep), want, "{method} {value}");
+        }
+    }
+
+    #[test]
+    fn story_chain_requirement_is_met_by_progress_on_a_later_stage() {
+        let global = |method: &str, value: f64| OtherRequirement {
+            kind: "globalVariable".into(),
+            variable_id: "story".into(),
+            compare_method: method.into(),
+            value,
+        };
+        let mut gated = task("gated", vec![obj("g", "giveItem", 1, false)]);
+        gated.other_requirements = vec![global(">=", 2.0)];
+        let stage1 = task("s1", vec![obj("v1", "visit", 1, false)]);
+        let stage2 = task("s2", vec![obj("v2", "visit", 1, false)]);
+        let stage3 = task("s3", vec![obj("v3", "visit", 1, false)]);
+        let mut c = catalog(vec![gated.clone(), stage1, stage2, stage3]);
+        c.chains.insert("story".into(), vec![(1.0, "s1".into()), (2.0, "s2".into()), (3.0, "s3".into()), (9.0, "missing".into())]);
+        let mut p = known();
+        assert_eq!(classify_gate(&gated, &c, &p).0, Gate::Conditional);
+        p.objectives.insert("v1".into(), prog(true, 1));
+        assert_eq!(classify_gate(&gated, &c, &p).0, Gate::Conditional);
+        // Merely started stage 2 proves the counter is at least 2.
+        p.objectives.insert("v2".into(), prog(false, 1));
+        assert_eq!(classify_gate(&gated, &c, &p).0, Gate::Applicable);
+        // Unsupported comparison or kind can never be settled; a chain-less variable has nothing reached.
+        for other in [
+            global(">", 1.0),
+            OtherRequirement { kind: "dialogue".into(), ..global(">=", 1.0) },
+            OtherRequirement { variable_id: "none".into(), ..global(">=", 1.0) },
+        ] {
+            let mut t = gated.clone();
+            t.other_requirements = vec![other];
+            assert_eq!(classify_gate(&t, &c, &p).0, Gate::Conditional);
+        }
+    }
+
+    #[test]
+    fn other_blocker_names_the_first_unmet_reason() {
+        let c = Catalog::default();
+        let mut t = task("t", vec![]);
+        assert_eq!(other_blocker(&t, &c, &known()), "locked");
+        t.faction_name = "BEAR".into();
+        let mut p = known();
+        p.faction = None;
+        assert_eq!(other_blocker(&t, &c, &p), "set faction");
+        p.faction = Some("BEAR".into());
+        assert_eq!(other_blocker(&t, &c, &p), "locked");
+        t.faction_name = "Any".into();
+        t.lightkeeper_required = true;
+        assert_eq!(other_blocker(&t, &c, &known()), "Lightkeeper");
+        t.other_requirements = vec![OtherRequirement { kind: "dialogue".into(), ..Default::default() }];
+        assert_eq!(other_blocker(&t, &c, &known()), "trader dialogue");
+        t.other_requirements = vec![OtherRequirement { kind: "globalVariable".into(), compare_method: ">".into(), ..Default::default() }];
+        assert_eq!(other_blocker(&t, &c, &known()), "story step");
+        t.trader_requirements = vec![trader_req("level", ">=", 3.0)];
+        let mut low = known();
+        low.traders.insert("tr".into(), standing(Some(1), None));
+        assert_eq!(other_blocker(&t, &c, &low), "trader level");
+        // Faction "Any" with no faction set is not a blocker.
+        let mut any = task("a", vec![]);
+        any.faction_name = String::new();
+        assert_eq!(other_blocker(&any, &c, &p), "locked");
+    }
+
+    #[test]
+    fn mark_and_build_objectives_count_only_with_non_fir_shown() {
+        let mut mark = obj("m", "mark", 0, false);
+        mark.items.clear();
+        mark.marker_item = Some(ITEM.into());
+        let mut build = obj("b", "buildWeapon", 2, false);
+        build.items.clear();
+        build.build_item = Some(ITEM.into());
+        let mut other = obj("x", "mark", 1, false);
+        other.items.clear();
+        other.marker_item = Some("else".into());
+        let mut optional = obj("o", "mark", 1, false);
+        optional.optional = true;
+        optional.marker_item = Some(ITEM.into());
+        let c = catalog(vec![task("t", vec![mark, build, other, optional, obj("s", "shoot", 5, false)])]);
+        let mut p = known();
+        assert_eq!(quest_needs(&c, ITEM, &p, true).current, 3);
+        assert_eq!(quest_needs(&c, ITEM, &p, false).current, 0);
+        // Any recorded progress on a marker objective satisfies one of its count.
+        p.objectives.insert("m".into(), prog(false, 0));
+        assert_eq!(quest_needs(&c, ITEM, &p, true).current, 2);
+    }
+
+    #[test]
+    fn fir_find_without_matching_give_is_not_paired_and_hand_in_uses_count_and_completion() {
+        let c = catalog(vec![task(
+            "t",
+            vec![
+                obj("f", "findItem", 3, true),
+                obj("g", "giveItem", 2, true),
+                obj("g2", "giveItem", 3, false),
+                obj("f2", "findItem", 3, false),
+            ],
+        )]);
+        let mut p = known();
+        // find(3,FIR) and give(2,FIR) differ in count, so both count; give(3) pairs with find(3).
+        assert_eq!(quest_needs(&c, ITEM, &p, true).tasks[0].count, 3 + 2 + 3);
+        assert_eq!(quest_needs(&c, ITEM, &p, true).tasks[0].fir, 5);
+        p.objectives.insert("g".into(), prog(true, 0));
+        p.objectives.insert("g2".into(), prog(false, 1));
+        assert_eq!(quest_needs(&c, ITEM, &p, true).tasks[0].count, 3 + 0 + 2);
+    }
+
+    #[test]
+    fn quest_needs_orders_active_before_available_and_skips_excluded_tasks() {
+        let mut active_small = task("a1", vec![obj("g1", "giveItem", 1, false), obj("v1", "visit", 1, false)]);
+        active_small.name = "Active small".into();
+        let mut active_big = task("a2", vec![obj("g2", "giveItem", 5, false), obj("v2", "visit", 1, false)]);
+        active_big.name = "Active big".into();
+        let mut avail_a = task("b1", vec![obj("g3", "giveItem", 2, false)]);
+        avail_a.name = "Same B".into();
+        let mut avail_b = task("b2", vec![obj("g4", "giveItem", 2, false)]);
+        avail_b.name = "Same A".into();
+        let mut avail_big = task("b3", vec![obj("g5", "giveItem", 9, false)]);
+        avail_big.name = "Avail big".into();
+        let mut future = task("f", vec![obj("g6", "giveItem", 1, false)]);
+        future.min_player_level = 40;
+        let mut lk = task("lk", vec![obj("g7", "giveItem", 1, false)]);
+        lk.lightkeeper_required = true;
+        lk.name = "A lightkeeper".into();
+        let excluded = task(EXCLUDED_TASKS[0], vec![obj("g8", "giveItem", 100, false)]);
+        let c = catalog(vec![active_small, active_big, avail_a, avail_b, avail_big, future, lk, excluded]);
+        let mut p = known();
+        p.objectives.insert("v1".into(), prog(true, 1));
+        p.objectives.insert("v2".into(), prog(false, 1));
+        let n = quest_needs(&c, ITEM, &p, true);
+        let order: Vec<&str> = n.tasks.iter().map(|t| t.task_id.as_str()).collect();
+        assert_eq!(order, vec!["a2", "a1", "b3", "b2", "b1", "lk", "f"]);
+        assert_eq!((n.current, n.future, n.conditional), (1 + 5 + 2 + 2 + 9, 1, 1));
+    }
+
+    #[test]
+    fn task_targets_skip_optional_unnamed_and_other_kind_objectives() {
+        let mut optional = obj("o", "giveItem", 1, false);
+        optional.optional = true;
+        let unnamed = obj("", "giveItem", 1, false);
+        let kill = obj("k", "shoot", 1, false);
+        let mut elsewhere = obj("e", "giveItem", 1, false);
+        elsewhere.items = vec!["else".into()];
+        let find_unnamed = obj("", "findItem", 2, true);
+        let give = obj("g", "giveItem", 2, true);
+        let plant = obj("p", "plantItem", 1, true);
+        let t = task("t", vec![optional, unnamed, kill, elsewhere, find_unnamed, give, plant]);
+        let mut p = known();
+        p.objectives.insert("p".into(), prog(true, 0));
+        let targets = task_targets(&t, ITEM, &p);
+        assert_eq!(targets.len(), 2);
+        // Paired with a find that has no id: the pair is one target without a find id.
+        assert_eq!((targets[0].id.as_str(), targets[0].find_id.clone(), targets[0].count, targets[0].remaining), ("g", None, 0, 2));
+        // A plantItem is never FIR; a completed one reads as its required count.
+        assert_eq!((targets[1].id.as_str(), targets[1].fir, targets[1].count, targets[1].remaining), ("p", false, 1, 0));
+    }
+
+    #[test]
+    fn missing_prereqs_counts_each_unfinished_ancestor_once_and_skips_unknown_and_done() {
+        let chain = |id: &str, pre: &[&str]| {
+            let mut t = task(id, vec![]);
+            t.task_requirements = pre.iter().map(|p| req(p, &["complete"])).collect();
+            t
+        };
+        let root = chain("root", &["a", "b", "ghost"]);
+        let c = catalog(vec![
+            root.clone(),
+            chain("a", &["shared", "done"]),
+            chain("b", &["shared"]),
+            chain("shared", &["a"]),
+            chain("done", &["hidden"]),
+            chain("hidden", &[]),
+        ]);
+        let mut p = known();
+        p.tasks.insert("done".into(), TaskProgress { complete: true, ..Default::default() });
+        // a, b, shared (a cycle back to a is not recounted); done and ghost are skipped.
+        assert_eq!(missing_prereqs(&root, &c, &p), 3);
+    }
+
+    #[test]
+    fn hideout_needs_skip_built_and_full_levels_and_report_trader_gates_and_other_progress() {
+        let item_req = |id: &str, item: &str, count, fir| HideoutRequirement { id: id.into(), item: item.into(), count, fir };
+        let mut c = Catalog::default();
+        c.stations.push(Station {
+            id: "s".into(),
+            name: "Gym".into(),
+            levels: vec![
+                StationLevel { id: "s-1".into(), level: 1, item_requirements: vec![item_req("r1", ITEM, 2, false)], ..Default::default() },
+                StationLevel {
+                    id: "s-2".into(),
+                    level: 2,
+                    item_requirements: vec![
+                        item_req("r2", ITEM, 3, false),
+                        item_req("r2b", ITEM, 1, true),
+                        item_req("o1", "other", 4, false),
+                        item_req("o2", "other", 2, false),
+                        item_req("o3", "other", 5, false),
+                    ],
+                    trader_requirements: vec![trader_req("level", ">=", 3.0), trader_req("level", ">=", 1.0)],
+                    ..Default::default()
+                },
+                StationLevel {
+                    id: "s-3".into(),
+                    level: 3,
+                    item_requirements: vec![item_req("r3", ITEM, 1, false)],
+                    station_requirements: vec![("ghost".into(), 1)],
+                    ..Default::default()
+                },
+            ],
+        });
+        c.level_unlocks.insert("s-2".into(), 4);
+        let mut p = known();
+        p.traders.insert("tr".into(), standing(Some(1), None));
+        p.hideout_modules.insert("s-1".into());
+        // r2 is half done, r2b fully handed in (complete), so only FIR-free remainder shows.
+        p.hideout_parts.insert("r2".into(), crate::progress::PartProgress { complete: false, count: 2 });
+        p.hideout_parts.insert("r2b".into(), crate::progress::PartProgress { complete: true, count: 0 });
+        p.hideout_parts.insert("o1".into(), crate::progress::PartProgress { complete: true, count: 0 });
+        p.hideout_parts.insert("o2".into(), crate::progress::PartProgress { complete: false, count: 9 });
+        let n = hideout_needs(&c, ITEM, &p);
+        assert_eq!(n.len(), 2);
+        let s2 = &n[0];
+        assert_eq!((s2.level, s2.remaining, s2.fir, s2.distance, s2.buildable, s2.unlocks), (2, 1, false, 1, false, 4));
+        assert_eq!(s2.other_done, Some(6.0 / 11.0));
+        // Level 3 has an unknown station prerequisite that adds no steps.
+        assert_eq!((n[1].level, n[1].distance, n[1].buildable, n[1].unlocks, n[1].other_done), (3, 1, false, 0, None));
+        // Fully handed-in levels do not need the item at all.
+        p.hideout_parts.insert("r2".into(), crate::progress::PartProgress { complete: true, count: 0 });
+        assert_eq!(hideout_needs(&c, ITEM, &p).len(), 1);
+    }
+
+    #[test]
+    fn without_item_clears_only_that_items_progress() {
+        let mut c = catalog(vec![task(
+            "t",
+            vec![
+                obj("g", "giveItem", 1, false),
+                obj("f", "findItem", 1, false),
+                obj("pl", "plantItem", 1, false),
+                obj("v", "visit", 1, false),
+                {
+                    let mut o = obj("x", "giveItem", 1, false);
+                    o.items = vec!["else".into()];
+                    o
+                },
+            ],
+        )]);
+        let item_req = |id: &str, item: &str| HideoutRequirement { id: id.into(), item: item.into(), count: 1, fir: false };
+        c.stations.push(Station {
+            id: "s".into(),
+            name: "S".into(),
+            levels: vec![StationLevel {
+                id: "s-1".into(),
+                level: 1,
+                item_requirements: vec![item_req("h1", ITEM), item_req("h2", "else")],
+                ..Default::default()
+            }],
+        });
+        let mut p = known();
+        for id in ["g", "f", "pl", "v", "x"] {
+            p.objectives.insert(id.into(), prog(true, 1));
+        }
+        for id in ["h1", "h2"] {
+            p.hideout_parts.insert(id.into(), crate::progress::PartProgress { complete: true, count: 1 });
+        }
+        let q = without_item(&c, ITEM, &p);
+        let mut kept: Vec<&str> = q.objectives.keys().map(String::as_str).collect();
+        kept.sort();
+        assert_eq!(kept, vec!["v", "x"]);
+        assert_eq!(q.hideout_parts.keys().collect::<Vec<_>>(), vec!["h2"]);
+    }
+
+    #[test]
+    fn recipes_using_counts_barters_and_crafts_separately() {
+        let recipe = |items: &[&str]| crate::data::Recipe { required_items: items.iter().map(|s| s.to_string()).collect() };
+        let mut c = Catalog::default();
+        c.barters = vec![recipe(&[ITEM, "x"]), recipe(&["x"]), recipe(&["y", ITEM])];
+        c.crafts = vec![recipe(&[ITEM]), recipe(&[])];
+        assert_eq!(recipes_using(&c, ITEM), (2, 1));
     }
 }
