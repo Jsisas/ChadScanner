@@ -251,8 +251,20 @@ fn rows(cat: &Catalog, p: &Progress, o: &CardOptions, q: &needs::QuestNeeds, hid
 /// The counts Arrow Up / Down walk, top card row first (every row, not only the `max_rows` shown).
 pub fn fill_order(cat: &Catalog, item: &Item, p: &Progress, o: &CardOptions) -> Vec<needs::Target> {
     let (q, hideout) = needs_of(cat, item, p, o);
-    rows(cat, p, o, &q, &hideout)
-        .into_iter()
+    targets_of(cat, item, p, rows(cat, p, o, &q, &hideout))
+}
+
+/// Arrow Down's targets: the card's rows as if none of `item` were handed in, with the real recorded counts.
+/// A need the last Arrow Up finished drops off the card (and `fill_order`), so Down could never undo that press.
+pub fn unfill_order(cat: &Catalog, item: &Item, p: &Progress, o: &CardOptions) -> Vec<needs::Target> {
+    let fresh = needs::without_item(cat, &item.id, p);
+    let (q, hideout) = needs_of(cat, item, &fresh, o);
+    targets_of(cat, item, p, rows(cat, &fresh, o, &q, &hideout))
+}
+
+/// Each row's targets, with counts from `p`.
+fn targets_of(cat: &Catalog, item: &Item, p: &Progress, rows: Vec<Row>) -> Vec<needs::Target> {
+    rows.into_iter()
         .flat_map(|r| match r.source {
             Source::Task(id) => cat.tasks.get(&id).map_or_else(Vec::new, |t| needs::task_targets(t, &item.id, p)),
             Source::Hideout(id) => needs::hideout_targets(cat, &id, &item.id, p),
@@ -763,6 +775,21 @@ mod tests {
         let o = CardOptions { hideout: false, ..OPTS };
         let ids: Vec<String> = fill_order(&cat, &item, &p, &o).into_iter().map(|t| t.id).collect();
         assert_eq!(ids, ["os", "ok"]);
+    }
+
+    #[test]
+    fn unfill_order_keeps_a_need_the_last_raise_finished() {
+        let (cat, item) = ordering_catalog();
+        let o = CardOptions { hideout: false, ..OPTS };
+        let mut p = Progress { level: Some(16), ..Default::default() };
+        // Side task's hand-in is full (the last Arrow Up finished it): it leaves the card and the fill order.
+        p.objectives.insert("os".into(), crate::progress::ObjectiveProgress { complete: true, count: 4, invalid: false });
+        let ids = |v: Vec<needs::Target>| v.into_iter().map(|t| (t.id, t.count)).collect::<Vec<_>>();
+        assert_eq!(ids(fill_order(&cat, &item, &p, &o)), [("ok".to_string(), 0)]);
+        // Arrow Down still sees it, in card order, with its real count.
+        assert_eq!(ids(unfill_order(&cat, &item, &p, &o)), [("os".to_string(), 4), ("ok".to_string(), 0)]);
+        let t = unfill_order(&cat, &item, &p, &o);
+        assert_eq!(needs::next_unfill(&t, None).map(|t| t.id.as_str()), Some("os"));
     }
 
     fn part(complete: bool, count: u32) -> crate::progress::PartProgress {

@@ -336,7 +336,7 @@ impl App {
             let up = step == win::hook::Step::Up;
             if self.ui.tracker_open() {
                 log::info!("tracker key: {}", if up { "up" } else { "down" });
-                let Some((item, all)) = self.last_fill_order() else {
+                let Some((item, all)) = self.last_fill_order(up) else {
                     self.toast("Scan an item first", "", card::AMBER);
                     continue;
                 };
@@ -353,25 +353,22 @@ impl App {
         }
     }
 
-    /// The last scanned item and its fill order; None without a scanned item or loaded data.
-    fn last_fill_order(&self) -> Option<(crate::data::Item, Vec<needs::Target>)> {
+    /// The last scanned item and its targets for Arrow Up (`up`, the fill order) or Arrow Down (`card::unfill_order`,
+    /// which keeps needs already finished); None without a scanned item or loaded data.
+    fn last_fill_order(&self, up: bool) -> Option<(crate::data::Item, Vec<needs::Target>)> {
         let (item_id, _, _) = self.last_item.lock().unwrap().clone()?;
-        self.fill_order_for(&item_id)
-    }
-
-    /// Item `item_id` and its fill order; None for an unknown item or without loaded data.
-    fn fill_order_for(&self, item_id: &str) -> Option<(crate::data::Item, Vec<needs::Target>)> {
         let cat = self.store.read().unwrap().get()?;
-        let item = cat.items.get(item_id)?;
+        let item = cat.items.get(&item_id)?;
         let opts = card::CardOptions::from_config(&self.cfg.read().unwrap());
-        let targets = card::fill_order(&cat, item, &self.progress().snapshot(), &opts);
+        let p = self.progress().snapshot();
+        let targets = if up { card::fill_order(&cat, item, &p, &opts) } else { card::unfill_order(&cat, item, &p, &opts) };
         Some((item.clone(), targets))
     }
 
     /// Raises (`delta` > 0) or lowers the last scanned item's next quest objective by one and redraws its card.
     /// Quest objectives only: the progress source has no hideout-part write.
     fn step(&self, delta: i32) {
-        let Some((item, mut targets)) = self.last_fill_order() else { return };
+        let Some((item, mut targets)) = self.last_fill_order(delta > 0) else { return };
         targets.retain(|t| t.kind == needs::TargetKind::Task);
         let src = self.progress();
         let t = if delta > 0 {
