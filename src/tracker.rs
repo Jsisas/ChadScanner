@@ -124,6 +124,8 @@ pub enum Message {
         /// hideout module id → complete
         modules: HashMap<String, bool>,
     },
+    /// Quests hidden on tarkovtracker.org (account-wide): task ids.
+    Hidden { tasks: std::collections::HashSet<String> },
 }
 
 /// `{id: {count, complete}}` → `id → make(complete, count)`; missing fields read as 0 / false, a non-object as empty.
@@ -171,6 +173,10 @@ pub fn parse(msg: &str) -> Option<Message> {
             modules: counts(p.get("modules"), |complete, _| complete),
         });
     }
+    if let Some(h) = v.get("hidden") {
+        let tasks = h.get("tasks")?.as_array()?.iter().filter_map(|t| t.as_str()).map(str::to_owned).collect();
+        return Some(Message::Hidden { tasks });
+    }
     if let Some(f) = v.get("fill") {
         let n = |k: &str| f.get(k).and_then(|c| c.as_f64()).unwrap_or(0.0).max(0.0) as u32;
         let rows = f.get("rows").and_then(serde_json::Value::as_array).map_or_else(Vec::new, |a| a.iter().filter_map(popup_row).collect());
@@ -182,6 +188,16 @@ pub fn parse(msg: &str) -> Option<Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_hidden_tasks() {
+        assert_eq!(
+            parse(r#"{"hidden":{"tasks":["a","b",3]}}"#),
+            Some(Message::Hidden { tasks: ["a".to_owned(), "b".to_owned()].into() })
+        );
+        assert_eq!(parse(r#"{"hidden":{"tasks":[]}}"#), Some(Message::Hidden { tasks: Default::default() }));
+        assert_eq!(parse(r#"{"hidden":{}}"#), None);
+    }
 
     #[test]
     fn parses_page_messages() {

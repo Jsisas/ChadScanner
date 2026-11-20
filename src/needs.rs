@@ -364,7 +364,8 @@ fn objective_need(item_id: &str, objectives: &[Objective], p: &Progress, show_no
 pub fn quest_needs(cat: &Catalog, item_id: &str, p: &Progress, show_non_fir: bool) -> QuestNeeds {
     let mut n = QuestNeeds::default();
     for task in cat.tasks.values() {
-        if EXCLUDED_TASKS.contains(&task.id.as_str()) {
+        // Hidden tasks are skipped like TarkovTracker's own needed items do; gates and unlock chains stay as they are.
+        if EXCLUDED_TASKS.contains(&task.id.as_str()) || p.hidden_tasks.contains(&task.id) {
             continue;
         }
         let (mut gate, unlock) = classify_gate(task, cat, p);
@@ -747,6 +748,15 @@ mod tests {
         p.objectives.insert("v".into(), ObjectiveProgress { complete: true, count: 1, invalid: false });
         let n = quest_needs(&c, ITEM, &p, true);
         assert_eq!(n.tasks.iter().find(|x| x.task_id == "t").unwrap().gate, Gate::Active);
+    }
+
+    #[test]
+    fn task_hidden_on_tarkovtracker_contributes_nothing() {
+        let c = catalog(vec![task("t", vec![obj("g", "giveItem", 2, false)])]);
+        assert_eq!(quest_needs(&c, ITEM, &known(), true).current, 2);
+        let mut p = known();
+        p.hidden_tasks.insert("t".into());
+        assert_eq!(quest_needs(&c, ITEM, &p, true), QuestNeeds::default());
     }
 
     #[test]

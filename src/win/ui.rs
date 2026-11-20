@@ -117,6 +117,8 @@ pub trait TrayActions {
         parts: std::collections::HashMap<String, crate::progress::PartProgress>,
         modules: std::collections::HashMap<String, bool>,
     );
+    /// The TarkovTracker window reported the quests hidden there (task ids).
+    fn tracker_hidden(&self, tasks: std::collections::HashSet<String>);
 }
 
 const TOAST_SECONDS: f32 = 4.0;
@@ -413,6 +415,7 @@ pub fn run(ui: &Ui, rx: Receiver<Cmd>, actions: &dyn TrayActions, paths: &crate:
                             Some(crate::tracker::Message::Progress { mode, objectives, parts, modules }) => {
                                 actions.tracker_progress(&mode, objectives, parts, modules)
                             }
+                            Some(crate::tracker::Message::Hidden { tasks }) => actions.tracker_hidden(tasks),
                             None => log::warn!("tracker: unknown message {m}"),
                         }
                     }

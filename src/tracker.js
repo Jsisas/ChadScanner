@@ -383,6 +383,21 @@
     const c = Number(e?.count) || 0;
     return e?.complete ? Math.max(c, t.required) : c;
   };
+  // Quests hidden on the site (account-wide, synced after login); `null` until the preferences store exists.
+  const hiddenTaskIds = () => {
+    const p = document.querySelector('#__nuxt')?.__vue_app__?.config.globalProperties.$pinia?.state.value.preferences;
+    return p && Array.isArray(p.hiddenTaskIds) ? [...new Set(p.hiddenTaskIds.filter((id) => typeof id === 'string'))].sort() : null;
+  };
+  // Polled, not $subscribe: the store is created lazily and replaced by the post-login sync.
+  let lastHidden = null;
+  function postHidden() {
+    const ids = hiddenTaskIds();
+    if (!ids) return;
+    const j = JSON.stringify(ids);
+    if (j === lastHidden) return;
+    lastHidden = j;
+    post({ hidden: { tasks: ids } });
+  }
   function postProgress() {
     const s = tarkovState();
     if (!s) return log('tracker: no progress store');
@@ -689,6 +704,7 @@
       ensureChadLayersButtons();
     }).observe(document.body, { childList: true, subtree: true });
   document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', watch) : watch();
+  setInterval(postHidden, 2000);
   // Tells the app this document has __chad: it replays the running raid's calls, which a page (re)load would lose.
   if (window.ipc) window.ipc.postMessage('chad-ready');
 })();

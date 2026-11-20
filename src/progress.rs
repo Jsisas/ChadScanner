@@ -42,6 +42,9 @@ pub struct Progress {
     pub level: Option<u8>,
     pub faction: Option<String>,
     pub traders: HashMap<String, TraderStanding>,
+    /// Quests hidden on tarkovtracker.org (account-wide task ids): left out of needs, so off the card and never
+    /// raised or filled. Set by the app from the TarkovTracker window; progress sources never fill it.
+    pub hidden_tasks: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

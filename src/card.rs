@@ -778,6 +778,20 @@ mod tests {
     }
 
     #[test]
+    fn quest_hidden_on_tarkovtracker_leaves_card_and_fill_order() {
+        let (cat, item) = ordering_catalog();
+        let o = CardOptions { hideout: false, ..OPTS };
+        let mut p = Progress { level: Some(16), ..Default::default() };
+        p.hidden_tasks.insert("s".into());
+        let ids: Vec<String> = fill_order(&cat, &item, &p, &o).into_iter().map(|t| t.id).collect();
+        assert_eq!(ids, ["ok"]);
+        assert!(unfill_order(&cat, &item, &p, &o).iter().all(|t| t.id != "os"));
+        let rows = show(&item_card(&cat, &item, 0.9, &p, &o));
+        assert!(rows.iter().all(|r| !r.contains("Side task")), "{rows:?}");
+        assert!(rows.iter().any(|r| r.contains("Kappa task")), "{rows:?}");
+    }
+
+    #[test]
     fn unfill_order_keeps_a_need_the_last_raise_finished() {
         let (cat, item) = ordering_catalog();
         let o = CardOptions { hideout: false, ..OPTS };

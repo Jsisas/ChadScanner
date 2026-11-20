@@ -10,7 +10,7 @@ use crate::progress::{LocalSource, Notify, ObjectiveProgress, PartProgress, Prog
 use crate::screenshot;
 use crate::win::{self, hook::ScanRequest, ui};
 use chadvision::engine::Engine;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
@@ -81,6 +81,8 @@ pub struct App {
     last_item: Mutex<Option<(String, (i32, i32), f32)>>,
     /// The item and objective Arrow Up raised last, which Arrow Down lowers first.
     last_step: Mutex<Option<(String, String)>>,
+    /// Quests hidden on tarkovtracker.org; empty until the TarkovTracker window reports. Not saved across restarts.
+    hidden_tasks: RwLock<HashSet<String>>,
     /// Serialises mode switches.
     switch: Mutex<()>,
     /// Newest release found by the update check; the tray item installs it.
@@ -118,6 +120,7 @@ impl App {
                 last_scan: Mutex::new(None),
                 last_item: Mutex::new(None),
                 last_step: Mutex::new(None),
+                hidden_tasks: RwLock::new(HashSet::new()),
                 switch: Mutex::new(()),
                 update_available: Mutex::new(None),
                 updating: AtomicBool::new(false),
@@ -315,7 +318,7 @@ impl App {
         let src = self.progress();
         // Picks up counts just marked on tarkovtracker.org (ETag, rate-limited).
         src.refresh_if_stale();
-        let c = card::item_card(&cat, item, top, &src.snapshot(), &opts);
+        let c = card::item_card(&cat, item, top, &self.card_progress(), &opts);
         *self.last_item.lock().unwrap() = Some((item.id.clone(), at, top));
         self.show_card(&c, at, Some(seconds).filter(|s| *s > 0.0));
         self.ui.send(ui::Cmd::TrackerItem { id: item.id.clone(), name: item.name.clone() });
@@ -353,6 +356,18 @@ impl App {
         }
     }
 
+    /// Progress for cards, Arrow keys and Chad Fill: the source's snapshot plus the quests hidden on tarkovtracker.org.
+    fn card_progress(&self) -> Arc<crate::progress::Progress> {
+        let p = self.progress().snapshot();
+        let hidden = self.hidden_tasks.read().unwrap();
+        if hidden.is_empty() {
+            return p;
+        }
+        let mut p = (*p).clone();
+        p.hidden_tasks = hidden.clone();
+        Arc::new(p)
+    }
+
     /// The last scanned item and its targets for Arrow Up (`up`, the fill order) or Arrow Down (`card::unfill_order`,
     /// which keeps needs already finished); None without a scanned item or loaded data.
     fn last_fill_order(&self, up: bool) -> Option<(crate::data::Item, Vec<needs::Target>)> {
@@ -360,7 +375,7 @@ impl App {
         let cat = self.store.read().unwrap().get()?;
         let item = cat.items.get(&item_id)?;
         let opts = card::CardOptions::from_config(&self.cfg.read().unwrap());
-        let p = self.progress().snapshot();
+        let p = self.card_progress();
         let targets = if up { card::fill_order(&cat, item, &p, &opts) } else { card::unfill_order(&cat, item, &p, &opts) };
         Some((item.clone(), targets))
     }
@@ -418,7 +433,7 @@ impl App {
             let c = self.cfg.read().unwrap();
             (card::CardOptions::from_config(&c), c.ui_scale)
         };
-        let c = card::item_card(&cat, item, score, &self.progress().snapshot(), &opts);
+        let c = card::item_card(&cat, item, score, &self.card_progress(), &opts);
         self.ui.send(ui::Cmd::Redraw(card::render(&c, &self.font, scale)));
     }
 
@@ -1191,7 +1206,7 @@ impl ui::TrayActions for Arc<App> {
             let c = self.cfg.read().unwrap();
             (card::CardOptions::from_config(&c), c.overfill_fir)
         };
-        let scope = card::fill_scope(cat, item, &self.progress().snapshot(), &opts, &popup);
+        let scope = card::fill_scope(cat, item, &self.card_progress(), &opts, &popup);
         if scope.targets.is_empty() {
             log::warn!(
                 "tracker fill: none of the popup's rows {:?} are on the card for {}",
@@ -1220,6 +1235,15 @@ impl ui::TrayActions for Arc<App> {
             fir_left,
             non_fir_left,
         });
+    }
+
+    fn tracker_hidden(&self, tasks: HashSet<String>) {
+        if *self.hidden_tasks.read().unwrap() == tasks {
+            return;
+        }
+        log::info!("tracker: {} hidden quest(s)", tasks.len());
+        *self.hidden_tasks.write().unwrap() = tasks;
+        self.redraw_last_card();
     }
 
     fn tracker_progress(
