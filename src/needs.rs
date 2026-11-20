@@ -105,7 +105,14 @@ fn task_entry<'a>(p: &'a Progress, id: &str) -> Option<&'a crate::progress::Task
 /// Started-but-unfinished tasks show up only as recorded objective progress.
 fn task_shows_progress(task: &Task, p: &Progress) -> bool {
     let done = task_entry(p, &task.id).is_some_and(|e| e.complete || e.failed || e.invalid);
-    !done && task.objectives.iter().any(|o| p.objectives.get(&o.id).is_some_and(|e| !e.invalid))
+    // Item counts prove nothing: Arrow Up, Chad Fill and the site's own +/- add them to locked tasks too
+    // (collecting ahead), which made one press flip a locked task to "now".
+    !done
+        && task
+            .objectives
+            .iter()
+            .filter(|o| !matches!(o.kind.as_str(), "giveItem" | "findItem" | "plantItem"))
+            .any(|o| p.objectives.get(&o.id).is_some_and(|e| !e.invalid))
 }
 
 /// Tracker complete, or every non-optional objective complete; failure wins over completion.
@@ -721,7 +728,25 @@ mod tests {
         p.objectives.insert("f".into(), ObjectiveProgress { complete: false, count: 2, invalid: false });
         let n = quest_needs(&c, ITEM, &p, true);
         assert_eq!(n.current, 1);
-        assert_eq!(n.tasks[0].gate, Gate::Active);
+        assert!(n.tasks[0].is_current());
+    }
+
+    #[test]
+    fn item_counts_on_a_locked_task_do_not_unlock_it() {
+        // `t` needs `pre`, which is not done; collecting ahead puts a count on t's hand-in.
+        let mut t = task("t", vec![obj("g", "giveItem", 3, false), obj("v", "visit", 1, false)]);
+        t.task_requirements = vec![crate::data::TaskRequirement { task: "pre".into(), status: vec!["complete".into()] }];
+        let c = catalog(vec![task("pre", vec![obj("k", "shoot", 5, false)]), t]);
+        let mut p = known();
+        p.objectives.insert("g".into(), ObjectiveProgress { complete: false, count: 1, invalid: false });
+        let n = quest_needs(&c, ITEM, &p, true);
+        let need = n.tasks.iter().find(|x| x.task_id == "t").unwrap();
+        assert_eq!(need.gate, Gate::Future);
+        assert_eq!(need.missing_prereqs, 1);
+        // Progress on a non-item objective still proves the task was started.
+        p.objectives.insert("v".into(), ObjectiveProgress { complete: true, count: 1, invalid: false });
+        let n = quest_needs(&c, ITEM, &p, true);
+        assert_eq!(n.tasks.iter().find(|x| x.task_id == "t").unwrap().gate, Gate::Active);
     }
 
     #[test]
