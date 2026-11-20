@@ -51,8 +51,9 @@ fi
 ORT_DLL="$CV/data/ort-win-x64-$ORT_VER/onnxruntime.dll"
 if [[ ! -f "$ORT_DLL" ]]; then
 	tmp="$(mktemp -d)"
-	curl -fsSL -o "$tmp/ort.zip" "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VER/onnxruntime-win-x64-$ORT_VER.zip"
-	unzip -q -j "$tmp/ort.zip" "onnxruntime-win-x64-$ORT_VER/lib/onnxruntime.dll" -d "$tmp"
+	# github.com/microsoft/onnxruntime releases are gone (404); the NuGet package ships the same win-x64 DLL.
+	curl -fsSL -o "$tmp/ort.nupkg" "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$ORT_VER/microsoft.ml.onnxruntime.$ORT_VER.nupkg"
+	unzip -q -j "$tmp/ort.nupkg" "runtimes/win-x64/native/onnxruntime.dll" -d "$tmp"
 	mkdir -p "$(dirname "$ORT_DLL")" && mv "$tmp/onnxruntime.dll" "$ORT_DLL"
 	rm -rf "$tmp"
 fi
