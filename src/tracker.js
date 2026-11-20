@@ -218,7 +218,10 @@
       await sleep(100);
     }
   }
-  const CARD = '[role=button][aria-label^="View details for"]';
+  // Needed-items cards. Since Nov 2026 a "Show each item once" card is `needed-item-group` and its "See where it's
+  // needed (n) for <name>" button opens the popup; the older `View details for <name>` card is kept as a fallback.
+  const GROUP = '[data-testid="needed-item-group"]';
+  const OLD_CARD = '[role=button][aria-label^="View details for"]';
   const itemModal = () =>
     [...document.querySelectorAll('[role=dialog][data-state=open]')].find((d) => d.querySelector('button[aria-label$="FIR count"]')) || null;
   const modalFor = (id) => {
@@ -226,10 +229,28 @@
     return d && d.querySelector('img[src*="/' + id + '-"]') ? d : null;
   };
   const router = () => document.querySelector('#__nuxt')?.__vue_app__?.config.globalProperties.$router || null;
-  const card = (id, name) =>
-    document.querySelector(CARD + ' img[src*="/' + id + '-"]')?.closest(CARD) ||
-    [...document.querySelectorAll(CARD)].find((c) => c.getAttribute('aria-label') === 'View details for ' + name) ||
-    null;
+  // The element whose click opens the item's popup.
+  const groupOpener = (g, name) =>
+    g.querySelector('button[aria-label^="See where"]') || [...g.querySelectorAll('button[aria-label]')].find((b) => b.getAttribute('aria-label').endsWith(' for ' + name));
+  const card = (id, name) => {
+    const groups = [...document.querySelectorAll(GROUP)];
+    const g =
+      groups.find((x) => x.querySelector('img[src*="/' + id + '-"]')) ||
+      groups.find((x) => [...x.querySelectorAll('h3')].some((h) => h.textContent.trim() === name));
+    if (g) return groupOpener(g, name) || g.querySelector('img') || null;
+    return (
+      document.querySelector(OLD_CARD + ' img[src*="/' + id + '-"]')?.closest(OLD_CARD) ||
+      [...document.querySelectorAll(OLD_CARD)].find((c) => c.getAttribute('aria-label') === 'View details for ' + name) ||
+      null
+    );
+  };
+  // "Show each item once" (was the "Combined view" button): one card per item, which is what `card` looks for.
+  const showOnce = () => {
+    const sw = document.querySelector('[data-testid="needed-items-show"] [role=switch]');
+    if (sw) return { el: sw, on: sw.getAttribute('aria-checked') === 'true' };
+    const old = document.querySelector('button[aria-label="Combined view"]');
+    return old ? { el: old, on: old.getAttribute('aria-pressed') !== 'false' } : null;
+  };
   const empty = () => [...document.querySelectorAll('[aria-live=polite]')].some((d) => d.textContent.trim() === 'No items match your search.');
 
   // Target ids Arrow Up raised for the open item, newest last; Arrow Down undoes the newest first.
@@ -256,9 +277,10 @@
     const route = r.currentRoute.value;
     if (route.path !== '/needed-items' || route.query.q !== name) await r.replace({ path: '/needed-items', query: { q: name } });
     if (stale()) return false;
-    const combined = await until(() => document.querySelector('button[aria-label="Combined view"]'), 8000, g);
+    const once = await until(showOnce, 8000, g);
     if (stale()) return false;
-    if (combined && combined.getAttribute('aria-pressed') === 'false') combined.click();
+    if (!once) log('tracker: no "Show each item once" switch');
+    else if (!once.on) once.el.click();
     let emptySince = 0;
     const c = await until(() => {
       const found = card(id, name);
@@ -588,7 +610,7 @@
   function ensureButton() {
     const m = itemModal();
     if (!m || m.querySelector('[data-chad-fill]')) return;
-    const sf = m.querySelector('[class*="i-mdi:auto-fix"]')?.closest('button');
+    const sf = m.querySelector('[class*="i-mdi:auto-fix"],[class*="i-mdi-auto-fix"]')?.closest('button');
     if (!sf) {
       if (!missingSmartFill.has(m)) (missingSmartFill.add(m), log('tracker: no Smart Fill button'));
       return;
