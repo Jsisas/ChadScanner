@@ -1,4 +1,5 @@
-//! Item, task, hideout and trader data from json.tarkov.dev, cached on disk and refreshed in the background.
+//! Item, task, hideout and trader data from json.tarkov.dev (plus TarkovTracker's extra tasks and their names), cached on
+//! disk and refreshed in the background.
 use crate::config::Mode;
 use serde::Deserialize;
 use serde_json::Value;
@@ -9,9 +10,12 @@ use std::time::Duration;
 
 pub const ENDPOINTS: [&str; 10] =
     ["items", "items_en", "tasks", "tasks_en", "hideout", "hideout_en", "traders", "traders_en", "barters", "crafts"];
-/// Cache/body key of TarkovTracker's `tasks-core` (json.tarkov.dev plus tasks only its overlay has).
-/// Optional: kept out of `ENDPOINTS`, which are all required.
+/// Cache/body key of TarkovTracker's `tasks-core` (json.tarkov.dev plus tasks only its overlay has; names are `@tt:`
+/// references resolved through `TRACKER_STRINGS`). Optional: kept out of `ENDPOINTS`, which are all required.
 const TRACKER_TASKS: &str = "tt_tasks_core";
+/// Cache/body key of TarkovTracker's `strings` bundle, pruned to task names (`@tt:overlay:/tasks/<id>/name`).
+/// Optional, like `TRACKER_TASKS`.
+const TRACKER_STRINGS: &str = "tt_strings";
 const REFRESH: Duration = Duration::from_secs(600);
 const RETRY: Duration = Duration::from_secs(60);
 
@@ -440,6 +444,51 @@ fn tracker_tasks(body: &[u8]) -> Vec<RawTask> {
         .collect()
 }
 
+/// The `strings` bundle reduced to task names (the full one is ~7 MB), keeping its overlay version for cache checks.
+fn prune_strings(body: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let v: Value = serde_json::from_slice(body)?;
+    let strings = v
+        .pointer("/data/strings")
+        .and_then(Value::as_object)
+        .ok_or_else(|| anyhow::anyhow!("no `strings` object"))?;
+    let kept: serde_json::Map<String, Value> = strings
+        .iter()
+        .filter(|(k, v)| k.starts_with("@tt:overlay:/tasks/") && k.ends_with("/name") && v.is_string())
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    anyhow::ensure!(!kept.is_empty(), "no task names");
+    let version = v.pointer("/dataOverlay/version").and_then(Value::as_str);
+    Ok(serde_json::to_vec(&serde_json::json!({"data":{"strings": kept}, "dataOverlay":{"version": version}}))?)
+}
+
+fn strings_version(body: &[u8]) -> Option<String> {
+    let v: Value = serde_json::from_slice(body).ok()?;
+    v.pointer("/dataOverlay/version").and_then(Value::as_str).map(str::to_owned)
+}
+
+/// Resolved names from a (pruned) strings bundle. Never fails: an unusable body is logged and gives an empty map.
+fn tracker_strings(body: &[u8]) -> HashMap<String, String> {
+    let parsed = data(body).and_then(|mut d| Ok(serde_json::from_value(d.get_mut("strings").map(Value::take).unwrap_or_default())?));
+    parsed.unwrap_or_else(|e| {
+        log::warn!("TarkovTracker strings unusable: {e:#}");
+        HashMap::new()
+    })
+}
+
+/// A tasks-core name: `@tt:` references resolve through the strings bundle; an unresolved one falls back to the
+/// task id made readable (`placeholder_pay_the_fare` -> "Pay the fare") rather than showing the reference.
+fn tracker_task_name(strings: &HashMap<String, String>, name: &str, id: &str) -> String {
+    if !name.starts_with("@tt:") {
+        return name.to_owned();
+    }
+    if let Some(s) = strings.get(name) {
+        return s.clone();
+    }
+    let readable = id.strip_prefix("placeholder_").unwrap_or(id).replace('_', " ");
+    let mut chars = readable.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or(readable)
+}
+
 fn task_from_raw(r: RawTask, tasks_en: &HashMap<String, String>, chains: &mut HashMap<String, Vec<(f64, String)>>) -> Task {
     let other_requirements: Vec<OtherRequirement> = r
         .other_requirements
@@ -534,8 +583,11 @@ impl Catalog {
             })
             .collect();
         // Tasks only TarkovTracker's overlay has (e.g. "Pay the Fare!"); json.tarkov.dev wins on shared ids.
-        for r in bodies.get(TRACKER_TASKS).map(|b| tracker_tasks(b)).unwrap_or_default() {
+        // Their names are `@tt:` references, resolved through `TRACKER_STRINGS`.
+        let tt_strings = bodies.get(TRACKER_STRINGS).map(|b| tracker_strings(b)).unwrap_or_default();
+        for mut r in bodies.get(TRACKER_TASKS).map(|b| tracker_tasks(b)).unwrap_or_default() {
             if !tasks.contains_key(&r.id) {
+                r.name = tracker_task_name(&tt_strings, &r.name, &r.id);
                 let task = task_from_raw(r, &tasks_en, &mut chains);
                 tasks.insert(task.id.clone(), task);
             }
@@ -633,6 +685,9 @@ pub fn load_cached(cache_dir: &Path, mode: Mode) -> Option<Catalog> {
     if let Ok(b) = std::fs::read(cache_file(cache_dir, mode, TRACKER_TASKS)) {
         bodies.insert(TRACKER_TASKS, b);
     }
+    if let Ok(b) = std::fs::read(cache_file(cache_dir, mode, TRACKER_STRINGS)) {
+        bodies.insert(TRACKER_STRINGS, b);
+    }
     Catalog::build(&bodies).map_err(|e| log::warn!("cached {} data unusable: {e:#}", mode.api())).ok()
 }
 
@@ -661,6 +716,11 @@ fn tracker_tasks_url(host: &str, mode: Mode) -> String {
     format!("{host}/api/tarkov/tasks-core?gameMode={}&lang=en", mode.api())
 }
 
+/// TarkovTracker's name bundle; covers every game mode, so no `gameMode`.
+fn tracker_strings_url(host: &str) -> String {
+    format!("{host}/api/tarkov/strings?lang=en")
+}
+
 fn fetch_all(agent: &ureq::Agent, cache_dir: &Path, mode: Mode, hosts: &Hosts) -> anyhow::Result<Catalog> {
     let mut bodies = HashMap::new();
     for ep in ENDPOINTS {
@@ -671,18 +731,41 @@ fn fetch_all(agent: &ureq::Agent, cache_dir: &Path, mode: Mode, hosts: &Hosts) -
     }
     // Optional: tasks only TarkovTracker's overlay has. A failed or non-JSON response keeps the cached copy.
     let url = tracker_tasks_url(&hosts.tracker, mode);
-    let fetched = (|| -> anyhow::Result<Vec<u8>> {
+    let fetched = (|| -> anyhow::Result<(Vec<u8>, Option<String>)> {
+        let resp = agent.get(&url).call()?;
+        let version = resp.header("x-overlay-version").map(str::to_owned);
         let mut body = Vec::new();
-        std::io::Read::read_to_end(&mut agent.get(&url).call()?.into_reader(), &mut body)?;
+        std::io::Read::read_to_end(&mut resp.into_reader(), &mut body)?;
         data(&body)?;
-        Ok(body)
+        Ok((body, version))
     })();
-    let tracker = fetched
-        .map_err(|e| log::warn!("TarkovTracker tasks: {e:#}"))
-        .ok()
-        .or_else(|| std::fs::read(cache_file(cache_dir, mode, TRACKER_TASKS)).ok());
+    let fresh = fetched.map_err(|e| log::warn!("TarkovTracker tasks: {e:#}")).ok();
+    let overlay_version = fresh.as_ref().and_then(|(_, v)| v.clone());
+    let fetched_fresh = fresh.is_some();
+    let tracker = fresh.map(|(b, _)| b).or_else(|| std::fs::read(cache_file(cache_dir, mode, TRACKER_TASKS)).ok());
     if let Some(b) = tracker {
         bodies.insert(TRACKER_TASKS, b);
+    }
+    // Task names: the bundle is big, so refetch only when tasks-core is fresh and the overlay version moved.
+    let cached_strings = std::fs::read(cache_file(cache_dir, mode, TRACKER_STRINGS)).ok();
+    let stale = match (&cached_strings, &overlay_version) {
+        (None, _) => true,
+        (Some(c), Some(v)) => strings_version(c).as_deref() != Some(v.as_str()),
+        (Some(_), None) => false,
+    };
+    let strings = if fetched_fresh && stale {
+        let url = tracker_strings_url(&hosts.tracker);
+        let pruned = (|| -> anyhow::Result<Vec<u8>> {
+            let mut body = Vec::new();
+            std::io::Read::read_to_end(&mut agent.get(&url).call()?.into_reader(), &mut body)?;
+            prune_strings(&body)
+        })();
+        pruned.map_err(|e| log::warn!("TarkovTracker strings: {e:#}")).ok().or(cached_strings)
+    } else {
+        cached_strings
+    };
+    if let Some(b) = strings {
+        bodies.insert(TRACKER_STRINGS, b);
     }
     let catalog = Catalog::build(&bodies)?;
     // Cache only a set that parsed, so a bad response never replaces a good cache.
@@ -800,19 +883,23 @@ mod tests {
             TRACKER_TASKS,
             br#"{"data":{"tasks":[
                 {"id":"q","name":"Overridden","minPlayerLevel":40},
-                {"id":"placeholder_x","name":"Pay","minPlayerLevel":null,"otherRequirements":[{"type":"dialogue","id":"d"}],
+                {"id":"placeholder_x","name":"@tt:overlay:/tasks/placeholder_x/name","minPlayerLevel":null,"otherRequirements":[{"type":"dialogue","id":"d"}],
                  "taskRequirements":[{"task":{"id":"q","name":"Quest"},"status":["complete"]}],
                  "normalizedTraderRequirements":[{"requirementType":"level","compareMethod":">=","value":2,"trader":{"id":"t1","name":"Prapor"}}],
                  "objectives":[{"id":"o1","type":"findItem","count":1,"foundInRaid":true,"optional":false,"items":[{"id":"a","name":"A"}]},
                                {"id":"o2","type":"giveItem","count":1,"foundInRaid":true,"optional":false,"items":[{"id":"a","name":"A"}]}]},
+                {"id":"placeholder_pay_the_fare","name":"@tt:overlay:/tasks/placeholder_pay_the_fare/name"},
                 {"id":"broken","name":"Broken","objectives":5}
             ]}}"#
                 .to_vec(),
         );
+        b.insert(TRACKER_STRINGS, br#"{"data":{"strings":{"@tt:overlay:/tasks/placeholder_x/name":"Pay"}}}"#.to_vec());
         let c = Catalog::build(&b).unwrap();
         assert_eq!(c.tasks["q"].name, "Quest", "json.tarkov.dev wins on shared ids");
         assert_eq!(c.tasks["q"].min_player_level, 5);
         let x = &c.tasks["placeholder_x"];
+        assert_eq!(x.name, "Pay", "`@tt:` name resolved through the strings bundle");
+        assert_eq!(c.tasks["placeholder_pay_the_fare"].name, "Pay the fare", "unresolved falls back to the readable id");
         assert_eq!(x.min_player_level, 0);
         assert_eq!(x.objectives.len(), 2);
         assert_eq!(x.objectives[0].items, vec!["a"]);

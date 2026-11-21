@@ -13,15 +13,21 @@ fn tmp_dir(name: &str) -> PathBuf {
     d
 }
 
-const TRACKER_BODY: &str = r#"{"data":{"tasks":[{"id":"overlay_only","name":"Overlay Only","minPlayerLevel":3}]}}"#;
+const TRACKER_BODY: &str = r#"{"data":{"tasks":[{"id":"overlay_only","name":"@tt:overlay:/tasks/overlay_only/name","minPlayerLevel":3}]}}"#;
+/// Raw `strings` response: task names plus an unrelated entry that pruning must drop.
+const STRINGS_BODY: &str = r#"{"data":{"strings":{"@tt:overlay:/tasks/overlay_only/name":"Overlay Only","@tt:regular:maps:x Name":"Customs"}},"dataOverlay":{"version":"1"}}"#;
 
-/// Serves the `base()` catalog for `mode` on json.tarkov.dev's paths and `tracker` for `tasks-core`.
-fn catalog_server(mode: Mode, tracker: impl Fn() -> Reply + Send + 'static) -> MockServer {
+/// Serves the `base()` catalog for `mode` on json.tarkov.dev's paths, `tracker` for `tasks-core` and `strings` for the
+/// `strings` bundle.
+fn catalog_server(mode: Mode, tracker: impl Fn() -> Reply + Send + 'static, strings: impl Fn() -> Reply + Send + 'static) -> MockServer {
     let bodies = base();
     MockServer::start(move |req| {
         let path = req.path.split('?').next().unwrap_or("");
         if path == "/api/tarkov/tasks-core" {
             return tracker();
+        }
+        if path == "/api/tarkov/strings" {
+            return strings();
         }
         match path.strip_prefix(&format!("/{}/", mode.api())).and_then(|ep| bodies.get(ep)) {
             Some(body) => Reply::new(200, body.clone()),
@@ -60,19 +66,103 @@ fn the_default_hosts_are_the_real_services() {
 
 #[test]
 fn fetch_all_merges_tracker_tasks_and_caches_every_body() {
-    let s = catalog_server(Mode::Pve, || Reply::new(200, TRACKER_BODY));
+    let s = catalog_server(Mode::Pve, || Reply::new(200, TRACKER_BODY).header("x-overlay-version", "1"), || Reply::new(200, STRINGS_BODY));
     let dir = tmp_dir("fetch");
     let c = fetch_all(&agent_for_tests(), &dir, Mode::Pve, &hosts(&s)).unwrap();
     assert!(c.tasks.contains_key("q"), "json.tarkov.dev tasks");
     assert_eq!(c.tasks["overlay_only"].min_player_level, 3, "TarkovTracker's overlay task");
-    for ep in ENDPOINTS.iter().copied().chain([TRACKER_TASKS]) {
+    assert_eq!(c.tasks["overlay_only"].name, "Overlay Only", "`@tt:` name resolved");
+    for ep in ENDPOINTS.iter().copied().chain([TRACKER_TASKS, TRACKER_STRINGS]) {
         assert!(cached(&dir, Mode::Pve, ep).is_some(), "{ep} cached");
     }
+    let strings: Value = serde_json::from_slice(&cached(&dir, Mode::Pve, TRACKER_STRINGS).unwrap()).unwrap();
+    let keys: Vec<_> = strings["data"]["strings"].as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["@tt:overlay:/tasks/overlay_only/name"], "the cached bundle is pruned to task names");
     let tt = s.requests().into_iter().find(|r| r.path.starts_with("/api/tarkov/tasks-core")).expect("tasks-core requested");
     assert_eq!(tt.path, "/api/tarkov/tasks-core?gameMode=pve&lang=en");
     assert!(tt.header("user-agent").is_some_and(|ua| ua.starts_with("ChadScanner/")));
+    let st = s.requests().into_iter().find(|r| r.path.starts_with("/api/tarkov/strings")).expect("strings requested");
+    assert_eq!(st.path, "/api/tarkov/strings?lang=en");
     // And what was cached rebuilds the same catalog offline.
-    assert!(load_cached(&dir, Mode::Pve).unwrap().tasks.contains_key("overlay_only"));
+    assert_eq!(load_cached(&dir, Mode::Pve).unwrap().tasks["overlay_only"].name, "Overlay Only");
+}
+
+/// tasks-core answering with a switchable `x-overlay-version` header (none when `None`).
+fn versioned_server(version: Arc<Mutex<Option<&'static str>>>) -> MockServer {
+    catalog_server(
+        Mode::Pve,
+        move || {
+            let r = Reply::new(200, TRACKER_BODY);
+            match *version.lock().unwrap() {
+                Some(v) => r.header("x-overlay-version", v),
+                None => r,
+            }
+        },
+        || Reply::new(200, STRINGS_BODY),
+    )
+}
+
+#[test]
+fn strings_are_refetched_only_when_the_overlay_version_changes() {
+    let dir = tmp_dir("strings-version");
+    let version = Arc::new(Mutex::new(Some("1")));
+    let s = versioned_server(version.clone());
+    let fetch = || fetch_all(&agent_for_tests(), &dir, Mode::Pve, &hosts(&s)).unwrap();
+    fetch();
+    assert_eq!(s.count("GET", "/api/tarkov/strings"), 1, "first run downloads the bundle");
+    fetch();
+    assert_eq!(s.count("GET", "/api/tarkov/strings"), 1, "same overlay version: cached bundle reused");
+    *version.lock().unwrap() = Some("2");
+    fetch();
+    assert_eq!(s.count("GET", "/api/tarkov/strings"), 2, "new overlay version: bundle downloaded again");
+    *version.lock().unwrap() = None;
+    fetch();
+    assert_eq!(s.count("GET", "/api/tarkov/strings"), 2, "no version header and a cache: no refetch");
+}
+
+#[test]
+fn a_failing_strings_fetch_keeps_the_cached_names() {
+    let dir = tmp_dir("strings-fail");
+    std::fs::write(cache_file(&dir, Mode::Pve, TRACKER_STRINGS), prune_strings(STRINGS_BODY.as_bytes()).unwrap()).unwrap();
+    for bad in [
+        Reply::new(500, "boom"),
+        Reply::new(200, "<html>Cloudflare</html>"),
+        Reply::new(200, r#"{"data":{"strings":{"@tt:regular:x":"y"}}}"#),
+    ] {
+        let bad = Mutex::new(Some(bad));
+        let s = catalog_server(
+            Mode::Pve,
+            || Reply::new(200, TRACKER_BODY).header("x-overlay-version", "2"),
+            move || bad.lock().unwrap().take().unwrap_or_else(|| Reply::new(500, "")),
+        );
+        let c = fetch_all(&agent_for_tests(), &dir, Mode::Pve, &hosts(&s)).unwrap();
+        assert_eq!(s.count("GET", "/api/tarkov/strings"), 1, "the bundle was attempted");
+        assert_eq!(c.tasks["overlay_only"].name, "Overlay Only");
+    }
+}
+
+/// The reported bug: a tracker-only task showed `@tt:overlay:/tasks/...` on the card. Whatever the strings bundle does
+/// (missing, down, garbage, lacking the key), no task name may be a raw reference, fetched or loaded from cache.
+#[test]
+fn no_strings_outcome_ever_shows_a_raw_tt_reference() {
+    let outcomes: [(&str, &str, u16); 5] = [
+        ("404", "", 404),
+        ("500", "down", 500),
+        ("html", "<html>", 200),
+        ("no key", r#"{"data":{"strings":{"@tt:overlay:/tasks/other/name":"Other"}}}"#, 200),
+        ("renamed format", r#"{"data":{"strings":{"@tt:overlay:/quests/overlay_only/title":"X"}}}"#, 200),
+    ];
+    for (what, body, status) in outcomes {
+        let dir = tmp_dir(&format!("no-raw-{}", what.replace(' ', "-")));
+        let s = catalog_server(Mode::Pve, || Reply::new(200, TRACKER_BODY), move || Reply::new(status, body));
+        let fetched = fetch_all(&agent_for_tests(), &dir, Mode::Pve, &hosts(&s)).unwrap();
+        let offline = load_cached(&dir, Mode::Pve).unwrap();
+        for (src, c) in [("fetched", fetched), ("cached", offline)] {
+            let raw: Vec<_> = c.tasks.values().filter(|t| t.name.contains("@tt:")).map(|t| &t.id).collect();
+            assert!(raw.is_empty(), "{what}/{src}: raw reference shown for {raw:?}");
+            assert_eq!(c.tasks["overlay_only"].name, "Overlay only", "{what}/{src}: readable id fallback");
+        }
+    }
 }
 
 #[test]
@@ -81,7 +171,8 @@ fn a_failing_tasks_core_falls_back_to_the_cached_copy() {
     std::fs::write(cache_file(&dir, Mode::Pve, TRACKER_TASKS), TRACKER_BODY).unwrap();
     for bad in [Reply::new(500, "boom"), Reply::new(200, "<html>Cloudflare</html>"), Reply::new(200, r#"{"nodata":1}"#)] {
         let bad = Mutex::new(Some(bad));
-        let s = catalog_server(Mode::Pve, move || bad.lock().unwrap().take().unwrap_or_else(|| Reply::new(500, "")));
+        let s =
+            catalog_server(Mode::Pve, move || bad.lock().unwrap().take().unwrap_or_else(|| Reply::new(500, "")), || Reply::new(404, ""));
         let c = fetch_all(&agent_for_tests(), &dir, Mode::Pve, &hosts(&s)).unwrap();
         assert!(c.tasks.contains_key("overlay_only"), "the cached overlay survives a bad answer");
     }
@@ -90,7 +181,7 @@ fn a_failing_tasks_core_falls_back_to_the_cached_copy() {
 
 #[test]
 fn tasks_core_is_optional() {
-    let s = catalog_server(Mode::Pve, || Reply::new(503, "down"));
+    let s = catalog_server(Mode::Pve, || Reply::new(503, "down"), || Reply::new(404, ""));
     let dir = tmp_dir("optional");
     let c = fetch_all(&agent_for_tests(), &dir, Mode::Pve, &hosts(&s)).unwrap();
     assert!(c.tasks.contains_key("q") && !c.tasks.contains_key("overlay_only"));
@@ -102,7 +193,7 @@ fn a_missing_required_endpoint_fails_the_fetch_and_leaves_the_cache_alone() {
     let dir = tmp_dir("required");
     std::fs::write(cache_file(&dir, Mode::Pve, "items"), "good cache").unwrap();
     // Serves the Pvp paths only, so every Pve endpoint is a 404.
-    let s = catalog_server(Mode::Pvp, || Reply::new(200, TRACKER_BODY));
+    let s = catalog_server(Mode::Pvp, || Reply::new(200, TRACKER_BODY), || Reply::new(404, ""));
     assert!(fetch_all(&agent_for_tests(), &dir, Mode::Pve, &hosts(&s)).is_err());
     assert_eq!(cached(&dir, Mode::Pve, "items").unwrap(), b"good cache");
 }
@@ -128,7 +219,7 @@ fn a_cache_that_cannot_be_written_does_not_fail_the_fetch() {
     let dir = tmp_dir("nocache");
     let blocker = dir.join("file");
     std::fs::write(&blocker, "x").unwrap();
-    let s = catalog_server(Mode::Pve, || Reply::new(200, TRACKER_BODY));
+    let s = catalog_server(Mode::Pve, || Reply::new(200, TRACKER_BODY), || Reply::new(404, ""));
     let c = fetch_all(&agent_for_tests(), &blocker.join("cache"), Mode::Pve, &hosts(&s)).unwrap();
     assert!(c.tasks.contains_key("q"));
 }
@@ -209,7 +300,7 @@ const LONG: Duration = Duration::from_secs(600);
 
 #[test]
 fn the_store_swaps_in_the_first_fetched_catalog() {
-    let s = catalog_server(Mode::Pve, || Reply::new(200, TRACKER_BODY));
+    let s = catalog_server(Mode::Pve, || Reply::new(200, TRACKER_BODY), || Reply::new(404, ""));
     let (missing, on_missing) = counter();
     let store = Store::start_at(hosts(&s), Mode::Pve, tmp_dir("store"), on_missing, LONG, LONG);
     let c = wait_for("the first fetch", || store.get());
@@ -236,7 +327,7 @@ fn the_store_says_once_that_there_is_no_data_and_keeps_retrying() {
 #[test]
 fn a_store_with_a_cache_serves_it_at_once_and_stays_quiet_when_the_fetch_fails() {
     let dir = tmp_dir("quiet");
-    let good = catalog_server(Mode::Pve, || Reply::new(200, TRACKER_BODY));
+    let good = catalog_server(Mode::Pve, || Reply::new(200, TRACKER_BODY), || Reply::new(404, ""));
     fetch_all(&agent_for_tests(), &dir, Mode::Pve, &hosts(&good)).unwrap();
     let down = MockServer::start(|_| Reply::new(500, "down"));
     let (missing, on_missing) = counter();

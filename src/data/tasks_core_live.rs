@@ -49,6 +49,14 @@ fn live_full_catalog_loads_with_tasks_core_merged_and_caches() {
     );
     assert!(!c.task_unlocks.is_empty() && !c.level_unlocks.is_empty());
     assert!(cache_file(&dir, Mode::Pve, TRACKER_TASKS).is_file(), "tasks-core was cached");
+    let bundle = std::fs::metadata(cache_file(&dir, Mode::Pve, TRACKER_STRINGS)).expect("the strings bundle was cached");
+    assert!(bundle.len() < 200_000, "strings bundle not pruned: {} bytes", bundle.len());
+    assert!(
+        c.tasks.values().all(|t| !t.name.starts_with("@tt:")),
+        "unresolved name: {:?}",
+        c.tasks.values().find(|t| t.name.starts_with("@tt:")).map(|t| &t.id)
+    );
+    assert_eq!(c.tasks["placeholder_pay_the_fare"].name, "Pay the Fare!");
     let again = load_cached(&dir, Mode::Pve).expect("what was cached loads offline");
     assert_eq!(again.tasks.len(), c.tasks.len());
 }
