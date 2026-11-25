@@ -86,7 +86,9 @@ async function hideoutItem(page) {
     for (const g of document.querySelectorAll('[data-testid="needed-item-group"]')) {
       const id = /\/([0-9a-f]{24})-/.exec(g.querySelector('img')?.getAttribute('src') || '')?.[1];
       const name = [...g.querySelectorAll('h3')].map((h) => h.textContent.trim())[0];
-      if (id && name && parts.has(id)) {
+      // The card must show a hideout count: the site leaves some items (currency) out of hideout needs even though a
+      // station level lists them, and such a card is on the page only for a quest.
+      if (id && name && parts.has(id) && /\bHideout\b/.test(g.innerText)) {
         const { part, level } = parts.get(id);
         return { id, name, partId: part.id, required: part.count, level };
       }
@@ -127,7 +129,34 @@ test('the site still exposes the router and the progress store actions the bridg
   assert.ok(['pvp', 'pve', 'seasonal'].includes(shape.mode), shape.mode);
   assert.equal(shape.section, 'object', 'progress lives under swapTarkov[currentGameMode]');
   assert.ok(shape.hiddenTaskIds, 'preferences.hiddenTaskIds is how hidden quests are read');
-  assert.deepEqual(await page.app.until('hidden'), { tasks: [] }, 'a signed-out visitor hides nothing');
+  // A signed-out visitor hides nothing by hand and has no progress, so the bridge reports exactly the tasks the site's
+  // own needed-items filter drops for its edition and prestige level (plus any it already marks invalid).
+  // The site's edition and prestige data settle after the metadata loads, so compare against the site's current answer
+  // until the bridge's latest message agrees with it.
+  const expectedHidden = (pinia) => {
+    const call = (f, ...a) => (typeof f === 'function' ? f(...a) : f);
+    const meta = pinia._s.get('metadata');
+    const tarkov = pinia._s.get('swapTarkov');
+    const progress = pinia._s.get('progress');
+    if (!meta.tasks?.length) return null;
+    const excluded = call(meta.getExcludedTaskIdsForEdition, call(tarkov.getGameEdition));
+    const prestige = Number(call(tarkov.getPrestigeLevel)) || 0;
+    const ids = new Set();
+    for (const t of meta.tasks) {
+      if (excluded.has(t.id) || (meta.prestigeTaskMap.has(t.id) && meta.prestigeTaskMap.get(t.id) !== prestige) || progress.invalidTasks?.[t.id]?.self === true) ids.add(t.id);
+    }
+    return [...ids].sort();
+  };
+  const end = Date.now() + 60000;
+  let expected = null;
+  let posted = null;
+  while (true) {
+    expected = await site(page, expectedHidden);
+    posted = (await page.app.messages()).filter((m) => m && m.hidden).map((m) => m.hidden.tasks).pop();
+    if (expected && JSON.stringify(posted) === JSON.stringify(expected)) break;
+    if (Date.now() > end) assert.deepEqual(posted, expected, 'the bridge reports the quests the site drops for a signed-out visitor');
+    await page.waitForTimeout(250);
+  }
   await page.done();
 });
 
