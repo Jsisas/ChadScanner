@@ -1241,7 +1241,7 @@ impl ui::TrayActions for Arc<App> {
         if *self.hidden_tasks.read().unwrap() == tasks {
             return;
         }
-        log::info!("tracker: {} hidden quest(s)", tasks.len());
+        log::info!("tracker: {} hidden or filtered-out quest(s)", tasks.len());
         *self.hidden_tasks.write().unwrap() = tasks;
         self.redraw_last_card();
     }

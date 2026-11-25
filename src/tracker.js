@@ -386,10 +386,49 @@
     const c = Number(e?.count) || 0;
     return e?.complete ? Math.max(c, t.required) : c;
   };
-  // Quests hidden on the site (account-wide, synced after login); `null` until the preferences store exists.
+  // Quests the site leaves out of its needed items: hidden by hand (account-wide, synced after login), completed, made
+  // invalid by the site's own reasoning (the other side of a choice, a failed prerequisite), or dropped by the task
+  // filters (Kappa / Lightkeeper / other quests), the game edition or another prestige level. Mirrors the site's
+  // needed-items filter; faction ChadScanner already checks itself.
+  // `null` until the preferences store exists.
   const hiddenTaskIds = () => {
-    const p = document.querySelector('#__nuxt')?.__vue_app__?.config.globalProperties.$pinia?.state.value.preferences;
-    return p && Array.isArray(p.hiddenTaskIds) ? [...new Set(p.hiddenTaskIds.filter((id) => typeof id === 'string'))].sort() : null;
+    const stores = document.querySelector('#__nuxt')?.__vue_app__?.config.globalProperties.$pinia?._s;
+    const prefs = stores?.get('preferences');
+    if (!prefs || !Array.isArray(prefs.hiddenTaskIds)) return null;
+    const out = new Set(prefs.hiddenTaskIds.filter((id) => typeof id === 'string'));
+    const meta = stores.get('metadata');
+    const tarkov = stores.get('swapTarkov');
+    const progress = stores.get('progress');
+    const tasks = Array.isArray(meta?.tasks) ? meta.tasks : [];
+    for (const m of [progress?.invalidTasks, progress?.tasksCompletions])
+      for (const [id, by] of Object.entries(m || {})) if (by?.self === true) out.add(id);
+    if (tasks.length) {
+      const call = (f, ...a) => (typeof f === 'function' ? f(...a) : f);
+      const kappa = !prefs.getHideNonKappaTasks;
+      const lk = prefs.getShowLightkeeperTasks !== false;
+      const other = prefs.getShowNonSpecialTasks !== false;
+      const filtered = kappa || lk || other;
+      const prestige = Number(call(tarkov?.getPrestigeLevel)) || 0;
+      const prestigeMap = meta.prestigeTaskMap instanceof Map ? meta.prestigeTaskMap : new Map();
+      let excluded = null;
+      try {
+        excluded = call(meta.getExcludedTaskIdsForEdition, call(tarkov?.getGameEdition));
+      } catch (e) {
+        log('tracker: edition filter: ' + e);
+      }
+      for (const t of tasks) {
+        if (typeof t?.id !== 'string') continue;
+        const k = t.kappaRequired === true;
+        const l = t.lightkeeperRequired === true;
+        if (
+          excluded?.has?.(t.id) ||
+          (prestigeMap.has(t.id) && prestigeMap.get(t.id) !== prestige) ||
+          (filtered && !((k && kappa) || (l && lk) || (!k && !l && other)))
+        )
+          out.add(t.id);
+      }
+    }
+    return [...out].sort();
   };
   // Polled, not $subscribe: the store is created lazily and replaced by the post-login sync.
   let lastHidden = null;
