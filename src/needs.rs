@@ -291,15 +291,24 @@ pub fn classify_gate(task: &Task, cat: &Catalog, p: &Progress) -> (Gate, Option<
     (gate, unlock)
 }
 
+/// Whether `o` takes the item: as any item it accepts, or (`own_only`) as the first, its own.
+fn accepts(o: &Objective, item_id: &str, own_only: bool) -> bool {
+    if own_only {
+        o.items.first().is_some_and(|i| i == item_id)
+    } else {
+        o.items.iter().any(|i| i == item_id)
+    }
+}
+
 /// Remaining count for one objective and whether it requires found-in-raid.
-fn remaining_for_objective(item_id: &str, o: &Objective, p: &Progress, show_non_fir: bool) -> (u32, bool) {
+fn remaining_for_objective(item_id: &str, o: &Objective, p: &Progress, show_non_fir: bool, own_only: bool) -> (u32, bool) {
     if o.optional {
         return (0, false);
     }
     let progress = p.objectives.get(&o.id);
     match o.kind.as_str() {
         "giveItem" | "findItem" | "plantItem" => {
-            if !o.items.iter().any(|i| i == item_id) {
+            if !accepts(o, item_id, own_only) {
                 return (0, false);
             }
             let fir = o.kind != "plantItem" && o.found_in_raid;
@@ -324,8 +333,8 @@ fn remaining_for_objective(item_id: &str, o: &Objective, p: &Progress, show_non_
 
 /// Pairs each `giveItem` of the item with an equal-count, equal-FIR `findItem`: (indices of the paired
 /// finds, (give, find) index pairs).
-fn pairs(item_id: &str, objectives: &[Objective]) -> (Vec<usize>, Vec<(usize, usize)>) {
-    let wants = |o: &Objective, kind: &str| !o.optional && o.kind == kind && o.items.iter().any(|i| i == item_id);
+fn pairs(item_id: &str, objectives: &[Objective], own_only: bool) -> (Vec<usize>, Vec<(usize, usize)>) {
+    let wants = |o: &Objective, kind: &str| !o.optional && o.kind == kind && accepts(o, item_id, own_only);
     let mut paired_find: Vec<usize> = Vec::new();
     let mut pair_of: Vec<(usize, usize)> = Vec::new();
     for (gi, give) in objectives.iter().enumerate().filter(|(_, o)| wants(o, "giveItem")) {
@@ -341,16 +350,16 @@ fn pairs(item_id: &str, objectives: &[Objective]) -> (Vec<usize>, Vec<(usize, us
 }
 
 /// (total, fir) remaining for a task. A giveItem paired with an equal-count, equal-FIR findItem counts once.
-fn objective_need(item_id: &str, objectives: &[Objective], p: &Progress, show_non_fir: bool) -> (u32, u32) {
-    let (paired_find, pair_of) = pairs(item_id, objectives);
+fn objective_need(item_id: &str, objectives: &[Objective], p: &Progress, show_non_fir: bool, own_only: bool) -> (u32, u32) {
+    let (paired_find, pair_of) = pairs(item_id, objectives, own_only);
     let (mut fir, mut non_fir) = (0, 0);
     for (i, o) in objectives.iter().enumerate() {
         if paired_find.contains(&i) {
             continue;
         }
-        let (mut needed, requires_fir) = remaining_for_objective(item_id, o, p, show_non_fir);
+        let (mut needed, requires_fir) = remaining_for_objective(item_id, o, p, show_non_fir, own_only);
         if let Some(&(_, fi)) = pair_of.iter().find(|(g, _)| *g == i) {
-            needed = needed.min(remaining_for_objective(item_id, &objectives[fi], p, show_non_fir).0);
+            needed = needed.min(remaining_for_objective(item_id, &objectives[fi], p, show_non_fir, own_only).0);
         }
         if requires_fir {
             fir += needed;
@@ -361,11 +370,24 @@ fn objective_need(item_id: &str, objectives: &[Objective], p: &Progress, show_no
     (fir + non_fir, fir)
 }
 
+/// Quests still needing the item. TarkovTracker lists an objective under the first item it accepts; under another
+/// accepted item (an "any found in raid medicine" hand-over) it lists the objective only when no need in the item's
+/// popup is for that item itself: no quest objective naming it first and no unbuilt hideout level needing it.
 pub fn quest_needs(cat: &Catalog, item_id: &str, p: &Progress, show_non_fir: bool) -> QuestNeeds {
-    let mut n = QuestNeeds::default();
+    struct Row<'a> {
+        task: &'a Task,
+        gate: Gate,
+        unlock: Option<u32>,
+        /// (total, fir) counting every objective that accepts the item, and only those naming it first.
+        all: (u32, u32),
+        own: (u32, u32),
+    }
+    let mut rows: Vec<Row> = Vec::new();
+    let mut direct = !hideout_needs(cat, item_id, p).is_empty();
     for task in cat.tasks.values() {
         // Hidden tasks are skipped like TarkovTracker's own needed items do; gates and unlock chains stay as they are.
-        if EXCLUDED_TASKS.contains(&task.id.as_str()) || p.hidden_tasks.contains(&task.id) {
+        // So are tasks its task list for this mode lacks (tarkov.dev lists some tasks only for the other mode).
+        if EXCLUDED_TASKS.contains(&task.id.as_str()) || p.hidden_tasks.contains(&task.id) || cat.untracked.contains(&task.id) {
             continue;
         }
         let (mut gate, unlock) = classify_gate(task, cat, p);
@@ -376,7 +398,17 @@ pub fn quest_needs(cat: &Catalog, item_id: &str, p: &Progress, show_non_fir: boo
         if gate == Gate::NotApplicable {
             continue;
         }
-        let (count, fir) = objective_need(item_id, &task.objectives, p, show_non_fir);
+        let all = objective_need(item_id, &task.objectives, p, show_non_fir, false);
+        if all.0 == 0 {
+            continue;
+        }
+        let own = objective_need(item_id, &task.objectives, p, show_non_fir, true);
+        direct |= own.0 > 0;
+        rows.push(Row { task, gate, unlock, all, own });
+    }
+    let mut n = QuestNeeds::default();
+    for Row { task, mut gate, unlock, all, own } in rows {
+        let (count, fir) = if direct { own } else { all };
         if count == 0 {
             continue;
         }
@@ -465,7 +497,7 @@ fn recorded(o: &Objective, p: &Progress) -> u32 {
 
 /// Objectives of `task` that take `item_id`, in task order, full ones included.
 pub fn task_targets(task: &Task, item_id: &str, p: &Progress) -> Vec<Target> {
-    let (paired_find, pair_of) = pairs(item_id, &task.objectives);
+    let (paired_find, pair_of) = pairs(item_id, &task.objectives, false);
     let mut out = Vec::new();
     for (i, o) in task.objectives.iter().enumerate() {
         let takes = !o.optional
@@ -475,10 +507,10 @@ pub fn task_targets(task: &Task, item_id: &str, p: &Progress) -> Vec<Target> {
         if paired_find.contains(&i) || !takes {
             continue;
         }
-        let (mut remaining, fir) = remaining_for_objective(item_id, o, p, true);
+        let (mut remaining, fir) = remaining_for_objective(item_id, o, p, true, false);
         let find = pair_of.iter().find(|(g, _)| *g == i).map(|&(_, fi)| &task.objectives[fi]);
         if let Some(f) = find {
-            remaining = remaining.min(remaining_for_objective(item_id, f, p, true).0);
+            remaining = remaining.min(remaining_for_objective(item_id, f, p, true, false).0);
         }
         out.push(Target {
             kind: TargetKind::Task,
@@ -757,6 +789,49 @@ mod tests {
         let mut p = known();
         p.hidden_tasks.insert("t".into());
         assert_eq!(quest_needs(&c, ITEM, &p, true), QuestNeeds::default());
+    }
+
+    #[test]
+    fn task_missing_from_tarkovtracker_contributes_nothing() {
+        let mut c = catalog(vec![task("t", vec![obj("g", "giveItem", 2, false)])]);
+        c.untracked.insert("t".into());
+        assert_eq!(quest_needs(&c, ITEM, &known(), true), QuestNeeds::default());
+    }
+
+    /// An objective accepting `ITEM` after `first`, like "hand over any found in raid medicine".
+    fn alternate(id: &str, count: u32) -> Objective {
+        Objective { items: vec!["first".into(), ITEM.into()], ..obj(id, "giveItem", count, true) }
+    }
+
+    #[test]
+    fn alternative_item_counts_only_when_nothing_names_the_item_first() {
+        let alt = task("alt", vec![alternate("a", 4)]);
+        let own = task("own", vec![obj("o", "giveItem", 2, true)]);
+        let both = task("both", vec![alternate("b1", 3), obj("b2", "giveItem", 1, true)]);
+        // Nothing names the item first: the alternative hand-over is listed.
+        let n = quest_needs(&catalog(vec![alt.clone()]), ITEM, &known(), true);
+        assert_eq!((n.current, n.tasks.len()), (4, 1));
+        // A quest naming it first hides the alternative ones, and a task's own alternative objectives with them.
+        let n = quest_needs(&catalog(vec![alt, own, both]), ITEM, &known(), true);
+        assert_eq!(n.current, 3);
+        let mut names: Vec<_> = n.tasks.iter().map(|t| (t.name.as_str(), t.count)).collect();
+        names.sort();
+        assert_eq!(names, vec![("both", 1), ("own", 2)]);
+    }
+
+    #[test]
+    fn alternative_item_is_hidden_by_a_hideout_need_and_back_once_it_is_built() {
+        let mut c = catalog(vec![task("alt", vec![alternate("a", 4)])]);
+        let req = HideoutRequirement { id: "r".into(), item: ITEM.into(), count: 1, fir: true };
+        c.stations.push(Station {
+            id: "s".into(),
+            name: "Medstation".into(),
+            levels: vec![StationLevel { id: "s-3".into(), level: 3, item_requirements: vec![req], ..Default::default() }],
+        });
+        assert_eq!(quest_needs(&c, ITEM, &known(), true), QuestNeeds::default());
+        let mut p = known();
+        p.hideout_modules.insert("s-3".into());
+        assert_eq!(quest_needs(&c, ITEM, &p, true).current, 4);
     }
 
     #[test]

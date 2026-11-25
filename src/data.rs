@@ -3,7 +3,7 @@
 use crate::config::Mode;
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, Weak};
 use std::time::Duration;
@@ -145,6 +145,8 @@ pub struct Catalog {
     pub task_unlocks: HashMap<String, u32>,
     /// Station level id → number of station levels that (transitively) require it.
     pub level_unlocks: HashMap<String, u32>,
+    /// Tasks json.tarkov.dev lists but TarkovTracker's task list for this mode lacks; empty when that list isn't loaded.
+    pub untracked: HashSet<String>,
 }
 
 /// For each node, how many nodes are reachable through `edges` (node → direct dependents).
@@ -585,7 +587,16 @@ impl Catalog {
         // Tasks only TarkovTracker's overlay has (e.g. "Pay the Fare!"); json.tarkov.dev wins on shared ids.
         // Their names are `@tt:` references, resolved through `TRACKER_STRINGS`.
         let tt_strings = bodies.get(TRACKER_STRINGS).map(|b| tracker_strings(b)).unwrap_or_default();
-        for mut r in bodies.get(TRACKER_TASKS).map(|b| tracker_tasks(b)).unwrap_or_default() {
+        let tracker = bodies.get(TRACKER_TASKS).map(|b| tracker_tasks(b)).unwrap_or_default();
+        // tarkov.dev lists some tasks TarkovTracker's own list for this mode lacks (e.g. "Private Clinic" in PvE); its
+        // needed items never count them. Only known once its list loaded.
+        let untracked = if tracker.is_empty() {
+            HashSet::new()
+        } else {
+            let known: HashSet<&str> = tracker.iter().map(|r| r.id.as_str()).collect();
+            tasks.keys().filter(|id| !known.contains(id.as_str())).cloned().collect()
+        };
+        for mut r in tracker {
             if !tasks.contains_key(&r.id) {
                 r.name = tracker_task_name(&tt_strings, &r.name, &r.id);
                 let task = task_from_raw(r, &tasks_en, &mut chains);
@@ -660,6 +671,7 @@ impl Catalog {
             crafts: recipes("crafts")?,
             traders,
             chains,
+            untracked,
             ..Default::default()
         };
         c.compute_unlocks();
@@ -913,7 +925,18 @@ mod tests {
     fn unusable_tarkov_tracker_body_is_ignored() {
         let mut b = base();
         b.insert(TRACKER_TASKS, b"<html>".to_vec());
-        assert!(Catalog::build(&b).unwrap().tasks.contains_key("q"));
+        let c = Catalog::build(&b).unwrap();
+        assert!(c.tasks.contains_key("q"));
+        assert!(c.untracked.is_empty(), "no TarkovTracker list loaded: nothing is known to be missing from it");
+    }
+
+    #[test]
+    fn tasks_missing_from_the_tarkov_tracker_list_are_untracked() {
+        let mut b = base();
+        b.insert(TRACKER_TASKS, br#"{"data":{"tasks":[{"id":"other","name":"Other"}]}}"#.to_vec());
+        let c = Catalog::build(&b).unwrap();
+        assert!(c.tasks.contains_key("q") && c.tasks.contains_key("other"));
+        assert_eq!(c.untracked, HashSet::from(["q".to_owned()]));
     }
 
     #[test]
