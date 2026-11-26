@@ -28,6 +28,8 @@ const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
 const LOG_POLL_GAP: Duration = Duration::from_secs(1);
 /// `logstate.json` is rewritten at most this often unless a poll produced events.
 const LOG_SAVE_GAP: Duration = Duration::from_secs(30);
+/// How often recorded progress is checked for quests only the other faction gets.
+const FACTION_CHECK: Duration = Duration::from_secs(30);
 
 /// What a scan saw and decided; saved by the debug report.
 struct LastScan {
@@ -83,6 +85,8 @@ pub struct App {
     last_step: Mutex<Option<(String, String)>>,
     /// Quests hidden on tarkovtracker.org; empty until the TarkovTracker window reports. Not saved across restarts.
     hidden_tasks: RwLock<HashSet<String>>,
+    /// "<mode key>:<faction>" already warned about, so the faction warning shows once per mode and setting per run.
+    faction_warned: Mutex<Option<String>>,
     /// Serialises mode switches.
     switch: Mutex<()>,
     /// Newest release found by the update check; the tray item installs it.
@@ -121,6 +125,7 @@ impl App {
                 last_item: Mutex::new(None),
                 last_step: Mutex::new(None),
                 hidden_tasks: RwLock::new(HashSet::new()),
+                faction_warned: Mutex::new(None),
                 switch: Mutex::new(()),
                 update_available: Mutex::new(None),
                 updating: AtomicBool::new(false),
@@ -144,16 +149,14 @@ impl App {
     fn rebuild_progress(self: &Arc<Self>) {
         let cfg = self.cfg.read().unwrap().clone();
         let (src, local): (Arc<dyn ProgressSource>, Option<Arc<LocalSource>>) = match (cfg.source, cfg.token(cfg.mode)) {
-            (Source::Tracker, Some(token)) => {
-                match TrackerSource::start(cfg.mode, token, self.paths.pending(), self.notifier()) {
-                    Ok(t) => (t, None),
-                    Err(e) => {
-                        log::error!("TarkovTracker setup failed: {e:#}; using local progress");
-                        let l = Arc::new(LocalSource::open(self.paths.progress(), cfg.mode));
-                        (l.clone(), Some(l))
-                    }
+            (Source::Tracker, Some(token)) => match TrackerSource::start(cfg.mode, token, self.paths.pending(), self.notifier()) {
+                Ok(t) => (t, None),
+                Err(e) => {
+                    log::error!("TarkovTracker setup failed: {e:#}; using local progress");
+                    let l = Arc::new(LocalSource::open(self.paths.progress(), cfg.mode));
+                    (l.clone(), Some(l))
                 }
-            }
+            },
             (Source::Tracker, None) => {
                 log::warn!("no TarkovTracker token for {}; using local progress", cfg.mode.label());
                 self.toast("No TarkovTracker token", &format!("{} uses local progress", cfg.mode.label()), card::AMBER);
@@ -260,8 +263,7 @@ impl App {
             };
             let ms = started.elapsed().as_millis();
             log::info!("scan at ({},{}) took {ms} ms: {outcome}", req.x, req.y);
-            *self.last_scan.lock().unwrap() =
-                Some(LastScan { time: SystemTime::now(), req, shot, candidates, outcome, ms });
+            *self.last_scan.lock().unwrap() = Some(LastScan { time: SystemTime::now(), req, shot, candidates, outcome, ms });
         }
     }
 
@@ -509,17 +511,44 @@ impl App {
         self.store.read().unwrap().get().and_then(|c| c.tasks.get(id).map(|t| t.name.clone())).unwrap_or_else(|| id.to_owned())
     }
 
+    /// Toasts once per (mode, set faction) that `task`, which only the other faction gets, shows the setting is wrong.
+    fn warn_faction(&self, task: &crate::data::Task, p: &crate::progress::Progress, how: &str) {
+        let set = p.faction.as_deref().unwrap_or_default();
+        let key = format!("{}:{set}", self.cfg.read().unwrap().mode.key());
+        {
+            let mut warned = self.faction_warned.lock().unwrap();
+            if warned.as_deref() == Some(key.as_str()) {
+                return;
+            }
+            *warned = Some(key);
+        }
+        log::warn!("faction: {set} set, but {}-only task {} ({}) {how}", task.faction_name, task.id, task.name);
+        self.toast("Check your PMC faction", &format!("{set} set, but {}-only “{}” {how}", task.faction_name, task.name), card::AMBER);
+    }
+
+    /// EFT gave the player task `id`: if only the other faction gets it, the set faction is wrong.
+    fn check_faction_event(&self, id: &str, how: &str) {
+        let Some(cat) = self.store.read().unwrap().get() else { return };
+        let Some(task) = cat.tasks.get(id) else { return };
+        let p = self.progress().snapshot();
+        if crate::needs::other_faction(task, &p) {
+            self.warn_faction(task, &p, how);
+        }
+    }
+
     fn apply_event(self: &Arc<Self>, e: &Event, quiet: bool) {
         let prefix = if quiet { "catch-up: " } else { "" };
         match e {
             Event::SessionMode(m) => self.set_mode(*m, quiet),
             Event::TaskStarted(id) => {
+                self.check_faction_event(id, "was started in EFT");
                 log::info!("{prefix}task {id} started");
                 if !quiet {
                     self.toast("Task started", &self.task_name(id), card::TEXT);
                 }
             }
             Event::TaskFinished(id) => {
+                self.check_faction_event(id, "was completed in EFT");
                 let src = self.progress();
                 if src.snapshot().tasks.get(id).is_some_and(|t| t.complete && !t.failed) {
                     return log::info!("{prefix}task {id} already complete");
@@ -558,9 +587,8 @@ impl App {
                 if quiet {
                     return;
                 }
-                let name = item
-                    .as_ref()
-                    .and_then(|i| self.store.read().unwrap().get().and_then(|c| c.items.get(i).map(|x| x.short_name.clone())));
+                let name =
+                    item.as_ref().and_then(|i| self.store.read().unwrap().get().and_then(|c| c.items.get(i).map(|x| x.short_name.clone())));
                 match name {
                     Some(n) => self.toast("Flea sale", &format!("{}{n}", count.map(|c| format!("{c}× ")).unwrap_or_default()), card::GREEN),
                     None => self.toast("Flea item sold", "", card::GREEN),
@@ -1090,6 +1118,7 @@ impl App {
         let path = self.paths.config();
         let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
         let mut seen: Option<SystemTime> = mtime(&path);
+        let mut last_faction = Instant::now().checked_sub(FACTION_CHECK).unwrap_or_else(Instant::now);
         loop {
             std::thread::sleep(Duration::from_secs(1));
             let m = mtime(&path);
@@ -1099,6 +1128,16 @@ impl App {
             }
             if let Some(l) = self.local.read().unwrap().clone() {
                 l.reload_if_changed();
+            }
+            if last_faction.elapsed() >= FACTION_CHECK {
+                last_faction = Instant::now();
+                let cat = self.store.read().unwrap().get();
+                if let Some(cat) = cat {
+                    let p = self.progress().snapshot();
+                    if let Some(t) = crate::needs::faction_evidence(&cat, &p) {
+                        self.warn_faction(t, &p, "is marked done");
+                    }
+                }
             }
         }
     }

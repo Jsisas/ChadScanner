@@ -229,6 +229,28 @@ pub fn other_blocker(task: &Task, cat: &Catalog, p: &Progress) -> &'static str {
     "locked"
 }
 
+/// The task is BEAR- or USEC-only and the progress's faction is set to the other one.
+pub fn other_faction(task: &Task, p: &Progress) -> bool {
+    !task.faction_name.is_empty()
+        && !task.faction_name.eq_ignore_ascii_case("Any")
+        && p.faction.as_deref().is_some_and(|f| !f.eq_ignore_ascii_case(&task.faction_name))
+}
+
+/// An other-faction task recorded as done (task complete, ignoring `invalid`, or a non-item objective complete):
+/// evidence the set faction is wrong. Lowest name first, so the toast is stable.
+pub fn faction_evidence<'a>(cat: &'a Catalog, p: &Progress) -> Option<&'a Task> {
+    cat.tasks
+        .values()
+        .filter(|t| other_faction(t, p))
+        .filter(|t| {
+            p.tasks.get(&t.id).is_some_and(|e| e.complete)
+                || t.objectives.iter().any(|o| {
+                    !matches!(o.kind.as_str(), "giveItem" | "findItem" | "plantItem") && p.objectives.get(&o.id).is_some_and(|e| e.complete)
+                })
+        })
+        .min_by(|a, b| a.name.cmp(&b.name))
+}
+
 /// Gate without item context; second value is the level that unlocks a level-locked task.
 pub fn classify_gate(task: &Task, cat: &Catalog, p: &Progress) -> (Gate, Option<u32>) {
     if task_entry(p, &task.id).is_some_and(|e| e.complete || e.failed || e.invalid) {
@@ -745,6 +767,39 @@ mod tests {
 
     fn known() -> Progress {
         Progress { level: Some(10), faction: Some("USEC".into()), ..Default::default() }
+    }
+
+    #[test]
+    fn faction_evidence_flags_done_other_faction_tasks_only() {
+        let mut b = task("b", vec![obj("bm", "mark", 1, false), obj("bg", "giveItem", 1, false)]);
+        b.faction_name = "BEAR".into();
+        let mut u = task("u", vec![]);
+        u.faction_name = "USEC".into();
+        let a = task("a", vec![]);
+        let c = catalog(vec![b, u, a]);
+        let done = |invalid| TaskProgress { complete: true, failed: false, invalid };
+        let objective_done = ObjectiveProgress { complete: true, count: 0, invalid: false };
+
+        let mut p = known();
+        p.tasks.insert("u".into(), done(false));
+        p.tasks.insert("a".into(), done(false));
+        assert!(faction_evidence(&c, &p).is_none());
+
+        p.objectives.insert("bg".into(), objective_done.clone());
+        assert!(faction_evidence(&c, &p).is_none());
+
+        p.objectives.insert("bm".into(), objective_done);
+        assert_eq!(faction_evidence(&c, &p).map(|t| t.id.as_str()), Some("b"));
+
+        let mut p = known();
+        p.tasks.insert("b".into(), done(true));
+        assert_eq!(faction_evidence(&c, &p).map(|t| t.id.as_str()), Some("b"));
+
+        p.faction = None;
+        assert!(faction_evidence(&c, &p).is_none());
+
+        p.faction = Some("bear".into());
+        assert!(faction_evidence(&c, &p).is_none());
     }
 
     #[test]
